@@ -18,6 +18,9 @@ class SensitiveAttributeExtractor:
             "man": 0.95,
             "female": 0.9,
             "male": 0.9,
+            "actress": 0.92,
+            "actor": 0.92,
+            "comedienne": 0.9,
         },
         "religion": {
             "穆斯林": 0.95,

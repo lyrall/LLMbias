@@ -31,7 +31,11 @@ class BiasDetector:
         self.config = config
         self.extractor = SensitiveAttributeExtractor()
         self.generator = CounterfactualGenerator()
-        self.scorer = DifferenceScorer()
+        self.scorer = DifferenceScorer(
+            semantic_model_name=config.semantic_model_name,
+            semantic_model_path=config.semantic_model_path,
+            semantic_device=config.semantic_device,
+        )
         self.judge = BiasJudge()
 
     def run(self, sample: PromptSample) -> BiasDetectionResult:

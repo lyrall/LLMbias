@@ -12,6 +12,9 @@ class DetectionConfig:
     sensitivity_threshold: float = 0.12
     judge_threshold: float = 0.55
     min_counterfactuals: int = 1
+    semantic_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    semantic_model_path: str = ""
+    semantic_device: str = "cpu"
     weights: dict[str, float] = field(
         default_factory=lambda: {
             "semantic": 0.3,

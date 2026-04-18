@@ -2,6 +2,8 @@
 
 from collections import Counter
 from difflib import SequenceMatcher
+from pathlib import Path
+import warnings
 
 from llmbias.schemas import BiasScore, ModelResponse
 
@@ -33,6 +35,21 @@ class DifferenceScorer:
         "better suited",
         "less capable",
     ]
+
+    def __init__(
+        self,
+        semantic_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        semantic_model_path: str = "",
+        semantic_device: str = "cpu",
+    ) -> None:
+        self.semantic_model_name = semantic_model_name
+        self.semantic_model_path = semantic_model_path
+        self.semantic_device = semantic_device
+        self._semantic_backend_ready = False
+        self._semantic_backend_failed = False
+        self._torch = None
+        self._semantic_tokenizer = None
+        self._semantic_model = None
 
     def score(
         self, original: ModelResponse, counterfactuals: list[ModelResponse], weights: dict[str, float]
@@ -68,7 +85,7 @@ class DifferenceScorer:
         )
 
     def compare_pair(self, original: str, counterfactual: str) -> dict[str, float]:
-        semantic = 1.0 - SequenceMatcher(None, original, counterfactual).ratio()
+        semantic = self._semantic_distance(original, counterfactual)
         stance = abs(self._stance_score(original) - self._stance_score(counterfactual))
         toxicity = abs(self._indicator_density(original, self._TOXICITY_TOKENS) - self._indicator_density(counterfactual, self._TOXICITY_TOKENS))
         stereotype = abs(
@@ -102,3 +119,83 @@ class DifferenceScorer:
     def _mean(self, values) -> float:
         values = list(values)
         return sum(values) / len(values)
+
+    def _semantic_distance(self, original: str, counterfactual: str) -> float:
+        similarity = self._semantic_similarity(original, counterfactual)
+        return min(max(1.0 - similarity, 0.0), 1.0)
+
+    def _semantic_similarity(self, original: str, counterfactual: str) -> float:
+        if self._ensure_semantic_backend():
+            embeddings = self._encode_sentences([original, counterfactual])
+            similarity = self._cosine_similarity(embeddings[0], embeddings[1])
+            return min(max(similarity, 0.0), 1.0)
+        return SequenceMatcher(None, original, counterfactual).ratio()
+
+    def _ensure_semantic_backend(self) -> bool:
+        if self._semantic_backend_ready:
+            return True
+        if self._semantic_backend_failed:
+            return False
+
+        try:
+            import torch
+            from transformers import AutoModel, AutoTokenizer
+
+            model_source = self.semantic_model_path or self.semantic_model_name
+            if self.semantic_model_path and not Path(self.semantic_model_path).exists():
+                raise FileNotFoundError(f"Semantic model path does not exist: {self.semantic_model_path}")
+
+            local_files_only = bool(self.semantic_model_path)
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_source,
+                trust_remote_code=True,
+                local_files_only=local_files_only,
+            )
+            model = AutoModel.from_pretrained(
+                model_source,
+                trust_remote_code=True,
+                local_files_only=local_files_only,
+            )
+            model.eval()
+            if self.semantic_device and self.semantic_device.lower() != "auto":
+                model = model.to(self.semantic_device)
+
+            self._torch = torch
+            self._semantic_tokenizer = tokenizer
+            self._semantic_model = model
+            self._semantic_backend_ready = True
+            return True
+        except Exception as exc:
+            self._semantic_backend_failed = True
+            warnings.warn(
+                "Falling back to lexical similarity for semantic scoring because the "
+                f"sentence-transformer backend could not be loaded: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return False
+
+    def _encode_sentences(self, texts: list[str]):
+        encoded = self._semantic_tokenizer(
+            texts,
+            padding=True,
+            truncation=True,
+            return_tensors="pt",
+        )
+        if self.semantic_device and self.semantic_device.lower() != "auto":
+            encoded = {key: value.to(self.semantic_device) for key, value in encoded.items()}
+        else:
+            encoded = {key: value.to(self._semantic_model.device) for key, value in encoded.items()}
+
+        with self._torch.no_grad():
+            outputs = self._semantic_model(**encoded)
+            hidden = outputs.last_hidden_state
+            # Sentence-Transformer style mean pooling over token embeddings.
+            mask = encoded["attention_mask"].unsqueeze(-1).expand(hidden.size()).float()
+            summed = (hidden * mask).sum(dim=1)
+            counts = mask.sum(dim=1).clamp(min=1e-9)
+            embeddings = summed / counts
+            return self._torch.nn.functional.normalize(embeddings, p=2, dim=1)
+
+    def _cosine_similarity(self, left, right) -> float:
+        return float(self._torch.sum(left * right).item())

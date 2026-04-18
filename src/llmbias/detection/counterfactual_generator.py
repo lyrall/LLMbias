@@ -16,6 +16,9 @@ class CounterfactualGenerator:
             "man": "woman",
             "female": "male",
             "male": "female",
+            "actress": "actor",
+            "actor": "actress",
+            "comedienne": "comedian",
         },
         "religion": {
             "穆斯林": "基督徒",

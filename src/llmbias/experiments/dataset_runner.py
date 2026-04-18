@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from llmbias.datasets import BBQDatasetLoader
+from llmbias.datasets import BBQDatasetLoader, BOLDDatasetLoader
 from llmbias.experiments.end_to_end_runner import EndToEndRunner
 
 
@@ -21,6 +21,20 @@ class DatasetRunner:
     ) -> list[dict]:
         loader = BBQDatasetLoader(dataset_path)
         samples = loader.load(split=split, subset=subset, limit=limit)
+        results = [self.runner.run_sample(sample) for sample in samples]
+        if output_path:
+            self._write_jsonl(output_path, results)
+        return results
+
+    def run_bold(
+        self,
+        dataset_path: str,
+        subset: str = "",
+        limit: int | None = None,
+        output_path: str | None = None,
+    ) -> list[dict]:
+        loader = BOLDDatasetLoader(dataset_path)
+        samples = loader.load(subset=subset, limit=limit)
         results = [self.runner.run_sample(sample) for sample in samples]
         if output_path:
             self._write_jsonl(output_path, results)

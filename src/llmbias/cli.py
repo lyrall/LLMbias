@@ -50,10 +50,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     dataset_parser = subparsers.add_parser("run-dataset", help="Run the full pipeline on a local dataset")
-    dataset_parser.add_argument("--dataset", choices=["bbq"], required=True, help="Dataset name")
-    dataset_parser.add_argument("--dataset-path", required=True, help="Path to local dataset directory")
+    dataset_parser.add_argument("--dataset", choices=["bbq", "bold"], required=True, help="Dataset name")
+    dataset_parser.add_argument("--dataset-path", required=True, help="Path to local dataset directory or file")
     dataset_parser.add_argument("--split", default="test", help="Dataset split name")
-    dataset_parser.add_argument("--subset", default="", help="Optional BBQ subset name, e.g. Age_ambig")
+    dataset_parser.add_argument(
+        "--subset",
+        default="",
+        help="Optional dataset subset. For BBQ use values like Age_ambig; for BOLD use values like gender.",
+    )
     dataset_parser.add_argument("--limit", type=int, default=None, help="Optional number of samples to run")
     dataset_parser.add_argument("--output", default="", help="Optional JSONL output path")
     dataset_parser.add_argument(
@@ -95,13 +99,21 @@ def main() -> None:
         pipeline = EndToEndBiasPipeline(model=model, config=config)
         runner = EndToEndRunner(pipeline=pipeline, config=config)
         dataset_runner = DatasetRunner(runner=runner)
-        results = dataset_runner.run_bbq(
-            dataset_path=args.dataset_path,
-            split=args.split,
-            subset=args.subset,
-            limit=args.limit,
-            output_path=args.output or None,
-        )
+        if args.dataset == "bbq":
+            results = dataset_runner.run_bbq(
+                dataset_path=args.dataset_path,
+                split=args.split,
+                subset=args.subset,
+                limit=args.limit,
+                output_path=args.output or None,
+            )
+        else:
+            results = dataset_runner.run_bold(
+                dataset_path=args.dataset_path,
+                subset=args.subset,
+                limit=args.limit,
+                output_path=args.output or None,
+            )
         print(json.dumps(results, ensure_ascii=False, indent=2))
 
 
