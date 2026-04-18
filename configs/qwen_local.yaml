@@ -1,0 +1,33 @@
+experiment:
+  name: "qwen-bbq-age-10"
+  seed: 42
+
+model:
+  provider: "hf_local"
+  model_name: "Qwen"
+  model_path: "/home/liuruoyi/models/Qwen2.5-3B-Instruct"
+  device_map: "auto"
+  torch_dtype: "bfloat16"
+  max_new_tokens: 256
+  temperature: 0.0
+
+detection:
+  sensitivity_threshold: 0.12
+  judge_threshold: 0.35
+  min_counterfactuals: 1
+  weights:
+    semantic: 0.30
+    stance: 0.25
+    toxicity: 0.20
+    stereotype: 0.25
+
+correction:
+  max_passes: 2
+  preserve_weight: 0.5
+  fair_weight: 0.3
+  edit_cost_weight: 0.2
+  confidence_weight: 0.2
+  min_priority: 0.15
+
+evaluation:
+  lambda_values: [0.3, 0.5, 0.7]
