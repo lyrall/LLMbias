@@ -35,6 +35,9 @@ class BiasDetector:
             semantic_model_name=config.semantic_model_name,
             semantic_model_path=config.semantic_model_path,
             semantic_device=config.semantic_device,
+            sentiment_model_name=config.sentiment_model_name,
+            sentiment_model_path=config.sentiment_model_path,
+            sentiment_device=config.sentiment_device,
         )
         self.judge = BiasJudge()
 

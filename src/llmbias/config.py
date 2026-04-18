@@ -15,6 +15,9 @@ class DetectionConfig:
     semantic_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     semantic_model_path: str = ""
     semantic_device: str = "cpu"
+    sentiment_model_name: str = "distilbert/distilbert-base-uncased-finetuned-sst-2-english"
+    sentiment_model_path: str = ""
+    sentiment_device: str = "cpu"
     weights: dict[str, float] = field(
         default_factory=lambda: {
             "semantic": 0.3,

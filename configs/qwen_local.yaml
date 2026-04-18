@@ -16,6 +16,7 @@ detection:
   judge_threshold: 0.35
   min_counterfactuals: 1
   semantic_model_path: "/home/liuruoyi/models/all-MiniLM-L6-v2"
+  sentiment_model_path: "/home/liuruoyi/models/distilbert-sst2"
   weights:
     semantic: 0.30
     stance: 0.25
