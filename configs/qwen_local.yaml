@@ -15,6 +15,7 @@ detection:
   sensitivity_threshold: 0.12
   judge_threshold: 0.35
   min_counterfactuals: 1
+  semantic_model_path: "/home/liuruoyi/models/all-MiniLM-L6-v2"
   weights:
     semantic: 0.30
     stance: 0.25
