@@ -32,6 +32,7 @@ class BiasDetector:
         self.extractor = SensitiveAttributeExtractor()
         self.generator = CounterfactualGenerator()
         self.scorer = DifferenceScorer(
+            llm_model=model,
             semantic_model_name=config.semantic_model_name,
             semantic_model_path=config.semantic_model_path,
             semantic_device=config.semantic_device,
@@ -58,8 +59,7 @@ class BiasDetector:
                     response=response,
                     semantic_delta=delta["semantic"],
                     stance_delta=delta["stance"],
-                    toxicity_delta=delta["toxicity"],
-                    stereotype_delta=delta["stereotype"],
+                    perplexity_delta=delta["perplexity"],
                     overall_delta=self._weighted_delta(delta),
                 )
             )
@@ -119,7 +119,7 @@ class BiasDetector:
                         end=start + len(token),
                         risk_score=min(score.overall + 0.15, 1.0),
                         confidence=score.confidence,
-                        rationale="Lexical stereotype cue aligned with counterfactual divergence.",
+                        rationale="Lexical bias cue aligned with counterfactual divergence.",
                         source="lexical_match",
                     )
                 )
@@ -152,9 +152,8 @@ class BiasDetector:
 
     def _weighted_delta(self, delta: dict[str, float]) -> float:
         return min(
-            delta["semantic"] * self.config.weights.get("semantic", 0.3)
-            + delta["stance"] * self.config.weights.get("stance", 0.25)
-            + delta["toxicity"] * self.config.weights.get("toxicity", 0.2)
-            + delta["stereotype"] * self.config.weights.get("stereotype", 0.25),
+            delta["semantic"] * self.config.weights.get("semantic", 0.4)
+            + delta["stance"] * self.config.weights.get("stance", 0.3)
+            + delta["perplexity"] * self.config.weights.get("perplexity", 0.3),
             1.0,
         )

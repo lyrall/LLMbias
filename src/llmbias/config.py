@@ -20,10 +20,9 @@ class DetectionConfig:
     sentiment_device: str = "cpu"
     weights: dict[str, float] = field(
         default_factory=lambda: {
-            "semantic": 0.3,
-            "stance": 0.25,
-            "toxicity": 0.2,
-            "stereotype": 0.25,
+            "semantic": 0.4,
+            "stance": 0.3,
+            "perplexity": 0.3,
         }
     )
 

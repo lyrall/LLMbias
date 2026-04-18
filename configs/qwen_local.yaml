@@ -18,10 +18,9 @@ detection:
   semantic_model_path: "/home/liuruoyi/models/all-MiniLM-L6-v2"
   sentiment_model_path: "/home/liuruoyi/models/distilbert-sst2"
   weights:
-    semantic: 0.30
-    stance: 0.25
-    toxicity: 0.20
-    stereotype: 0.25
+    semantic: 0.4
+    stance: 0.3
+    perplexity: 0.3
 
 correction:
   max_passes: 2

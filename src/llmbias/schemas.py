@@ -41,9 +41,8 @@ class ModelResponse:
 class BiasScore:
     semantic: float
     stance: float
-    toxicity: float
+    perplexity: float
     overall: float
-    stereotype: float = 0.0
     confidence: float = 0.0
     details: dict[str, float] = field(default_factory=dict)
 
@@ -54,8 +53,7 @@ class CounterfactualOutcome:
     response: ModelResponse
     semantic_delta: float
     stance_delta: float
-    toxicity_delta: float
-    stereotype_delta: float
+    perplexity_delta: float
     overall_delta: float
 
 

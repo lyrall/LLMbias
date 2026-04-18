@@ -73,8 +73,7 @@ class CorrectionRunner:
             score=BiasScore(
                 semantic=risk_score,
                 stance=risk_score,
-                toxicity=0.0,
-                stereotype=risk_score,
+                perplexity=0.0,
                 overall=risk_score,
                 confidence=confidence,
                 details={"bootstrap": 1.0},
