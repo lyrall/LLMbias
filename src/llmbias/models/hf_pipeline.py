@@ -40,7 +40,7 @@ class HFPipelineLLM(BlackBoxLLM):
         )
 
     def generate(self, prompt: str) -> ModelResponse:
-        messages = [{"role": "user", "content": prompt}]
+        messages = self.build_messages(prompt)
         generation_kwargs = {"max_new_tokens": self.max_new_tokens}
         if self.temperature > 0:
             generation_kwargs["temperature"] = self.temperature
