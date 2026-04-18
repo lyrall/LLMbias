@@ -39,8 +39,7 @@ class HFPipelineLLM(BlackBoxLLM):
             device_map=device_map,
         )
 
-    def generate(self, prompt: str) -> ModelResponse:
-        messages = self.build_messages(prompt)
+    def generate_from_messages(self, messages: list[dict[str, str]]) -> ModelResponse:
         generation_kwargs = {"max_new_tokens": self.max_new_tokens}
         if self.temperature > 0:
             generation_kwargs["temperature"] = self.temperature

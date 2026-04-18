@@ -40,7 +40,7 @@ class BiasDetector:
             sentiment_model_path=config.sentiment_model_path,
             sentiment_device=config.sentiment_device,
         )
-        self.judge = BiasJudge()
+        self.judge = BiasJudge(model=model)
 
     def run(self, sample: PromptSample) -> BiasDetectionResult:
         attributes = self.extractor.extract(sample)

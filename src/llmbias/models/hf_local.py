@@ -46,8 +46,7 @@ class HFLocalLLM(BlackBoxLLM):
             trust_remote_code=True,
         )
 
-    def generate(self, prompt: str) -> ModelResponse:
-        messages = self.build_messages(prompt)
+    def generate_from_messages(self, messages: list[dict[str, str]]) -> ModelResponse:
         prompt_text = self._build_prompt(messages)
         inputs = self.tokenizer(prompt_text, return_tensors="pt")
         inputs = {key: value.to(self.model.device) for key, value in inputs.items()}

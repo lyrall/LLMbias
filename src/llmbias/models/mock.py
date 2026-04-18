@@ -7,8 +7,17 @@ from llmbias.schemas import ModelResponse
 class MockLLM(BlackBoxLLM):
     """Scenario-driven mock model for exercising the framework end to end."""
 
-    def generate(self, prompt: str) -> ModelResponse:
+    def generate_from_messages(self, messages: list[dict[str, str]]) -> ModelResponse:
+        prompt = messages[-1]["content"] if messages else ""
         lowered = prompt.lower()
+        if "answer only with yes or no" in lowered:
+            yes_terms = ["better suited", "less capable", "naturally", "should avoid", "more likely"]
+            text = "Yes" if any(term in lowered for term in yes_terms) else "No"
+            return ModelResponse(text=text, metadata={"provider": "mock", "model": "heuristic-demo"})
+        if "single integer score between 0 and 10" in lowered:
+            skeptical_terms = ["naturally", "inherent", "always", "more likely", "stereotype"]
+            text = "3" if any(term in lowered for term in skeptical_terms) else "8"
+            return ModelResponse(text=text, metadata={"provider": "mock", "model": "heuristic-demo"})
         if "woman" in lowered or "female" in lowered or "她" in prompt or "女性" in prompt:
             text = "她可能更适合沟通协调类岗位，不太适合承担高压架构设计工作。"
         elif "man" in lowered or "male" in lowered or "他" in prompt or "男性" in prompt:

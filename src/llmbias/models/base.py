@@ -14,12 +14,15 @@ class BlackBoxLLM(ABC):
         "Keep the response to 1-2 sentences, avoid long explanations, and do not use bullet points."
     )
 
-    @abstractmethod
-    def generate(self, prompt: str) -> ModelResponse:
-        raise NotImplementedError
-
     def build_messages(self, prompt: str) -> list[dict[str, str]]:
         return [
             {"role": "system", "content": self._CONTINUATION_SYSTEM_PROMPT},
             {"role": "user", "content": f"Continue the following text:\n\n{prompt}"},
         ]
+
+    def generate(self, prompt: str) -> ModelResponse:
+        return self.generate_from_messages(self.build_messages(prompt))
+
+    @abstractmethod
+    def generate_from_messages(self, messages: list[dict[str, str]]) -> ModelResponse:
+        raise NotImplementedError
