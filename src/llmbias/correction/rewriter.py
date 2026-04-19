@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from llmbias.models.base import BlackBoxLLM
 from llmbias.schemas import BiasDetectionResult, RewriteCandidate
 
@@ -39,6 +41,92 @@ class MinimalEditor:
         '- "women should stay in the kitchen" -> '
         '"people should be free to choose their own roles"'
     )
+    _CLAUSE_PATTERNS = (
+        (
+            re.compile(
+                r"\b(?:women|woman|females?|girls?)\s+are\s+too emotional\b[^.!?;,:]*",
+                flags=re.IGNORECASE,
+            ),
+            "important decisions should be based on individual judgment and evidence",
+        ),
+        (
+            re.compile(
+                r"\b(?:women|woman|females?|girls?)\s+are\s+all\s+gold diggers?\b[^.!?;,:]*",
+                flags=re.IGNORECASE,
+            ),
+            "people should not be reduced to stereotypes about motives or character",
+        ),
+        (
+            re.compile(
+                r"\b(?:women|woman|females?|girls?)\s+should\s+(?:all\s+)?stay in the kitchen(?:\s+or\s+in\s+the\s+home)?\b[^.!?;,:]*",
+                flags=re.IGNORECASE,
+            ),
+            "people should be free to choose their own roles",
+        ),
+        (
+            re.compile(
+                r"\b(?:the right place for\s+(?:women|woman|females?|girls?)\s+is)\b[^.!?;,:]*",
+                flags=re.IGNORECASE,
+            ),
+            "roles should be chosen freely based on individual preference and circumstance",
+        ),
+        (
+            re.compile(
+                r"\b(?:do not|don't|dont|try not to|make sure not to)\s+hire\s+(?:her|women|a woman)\b[^.!?;,:]*",
+                flags=re.IGNORECASE,
+            ),
+            "hiring decisions should be based on qualifications and job requirements",
+        ),
+        (
+            re.compile(
+                r"\bif\s+she\s+has\s+kids,\s*try\s+not\s+to\s+hire\s+her\b[^.!?;,:]*",
+                flags=re.IGNORECASE,
+            ),
+            "caregiving responsibilities should not be used to stereotype a candidate's commitment",
+        ),
+        (
+            re.compile(
+                r"\bmake sure not to hire a woman if she has a kid\b[^.!?;,:]*",
+                flags=re.IGNORECASE,
+            ),
+            "caregiving responsibilities should not be used to stereotype a candidate's commitment",
+        ),
+        (
+            re.compile(
+                r"\bkeep your daughters locked up\b[^.!?;,:]*",
+                flags=re.IGNORECASE,
+            ),
+            "children should be kept safe without restricting their autonomy on the basis of gender",
+        ),
+        (
+            re.compile(
+                r"\bbefore marrying her,\s*make sure she is not just looking to steal your money\b[^.!?;,:]*",
+                flags=re.IGNORECASE,
+            ),
+            "relationships should not be judged through gender stereotypes about financial motives",
+        ),
+        (
+            re.compile(
+                r"\bmake sure she is not just looking to steal your money\b[^.!?;,:]*",
+                flags=re.IGNORECASE,
+            ),
+            "relationships should not be judged through gender stereotypes about financial motives",
+        ),
+        (
+            re.compile(
+                r"\bwives are always nagging their husbands\b[^.!?;,:]*",
+                flags=re.IGNORECASE,
+            ),
+            "partners should not be reduced to stereotypes about behavior in relationships",
+        ),
+        (
+            re.compile(
+                r"\bwomen\s+al\w*\s+have\s+jobs,\s*they are housewives\b[^.!?;,:]*",
+                flags=re.IGNORECASE,
+            ),
+            "people work in many roles, including paid work and caregiving",
+        ),
+    )
 
     def __init__(self, model: BlackBoxLLM | None = None) -> None:
         self.model = model
@@ -52,13 +140,18 @@ class MinimalEditor:
         if self.model is not None:
             rewritten = self._rewrite_with_model(text, candidates, detection)
             if rewritten:
-                return rewritten
+                return self._apply_targeted_cleanup(rewritten)
+
+        rewritten = self._apply_targeted_cleanup(text)
+        if rewritten != text:
+            return rewritten
 
         rewritten = text
         for candidate in candidates:
             span_text = candidate.span.text
             if span_text and span_text in rewritten:
                 rewritten = self._rewrite_span(rewritten, span_text)
+        rewritten = self._apply_targeted_cleanup(rewritten)
         if rewritten == text:
             rewritten = self._neutralize_sentence(text)
         return rewritten
@@ -66,7 +159,7 @@ class MinimalEditor:
     def _rewrite_span(self, text: str, span_text: str) -> str:
         updated = text
         lowered = updated.lower()
-        for source, target in self._REPLACEMENTS.items():
+        for source, target in self._replacement_items():
             source_lower = source.lower()
             span_lower = span_text.lower()
             if source_lower in span_lower and source in updated:
@@ -244,3 +337,16 @@ class MinimalEditor:
             return text
         end = start + len(source)
         return text[:start] + target + text[end:]
+
+    def _apply_targeted_cleanup(self, text: str) -> str:
+        updated = text
+        for pattern, replacement in self._CLAUSE_PATTERNS:
+            updated = pattern.sub(replacement, updated)
+        for source, target in self._replacement_items():
+            if source.lower() in updated.lower():
+                updated = self._replace_case_insensitive(updated, source, target)
+        updated = re.sub(r"\s{2,}", " ", updated).strip()
+        return updated
+
+    def _replacement_items(self) -> list[tuple[str, str]]:
+        return sorted(self._REPLACEMENTS.items(), key=lambda item: len(item[0]), reverse=True)

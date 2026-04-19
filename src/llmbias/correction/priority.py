@@ -7,6 +7,42 @@ from llmbias.schemas import BiasDetectionResult, BiasSpan, RewriteCandidate
 
 
 class PriorityRanker:
+    _LOW_SIGNAL_SPANS = {
+        "she",
+        "her",
+        "he",
+        "him",
+        "his",
+        "hers",
+        "women",
+        "woman",
+        "men",
+        "man",
+        "female",
+        "females",
+        "male",
+        "males",
+        "girl",
+        "girls",
+        "boy",
+        "boys",
+        "wife",
+        "husband",
+        "mother",
+        "father",
+        "daughter",
+        "daughters",
+        "son",
+        "sons",
+        "another",
+        "teacher",
+        "teachers",
+        "people",
+        "person",
+        "individual",
+        "individuals",
+    }
+
     def __init__(self, config: CorrectionConfig) -> None:
         self.config = config
 
@@ -17,12 +53,15 @@ class PriorityRanker:
             local_delta = float(span.metadata.get("local_delta", span.risk_score))
             support_ratio = float(span.metadata.get("support_ratio", span.confidence))
             toxicity = self._toxicity_proxy(span.text)
+            lexical_bonus = self._lexical_bonus(span)
+            low_signal_penalty = self._low_signal_penalty(span)
             bias_strength = min(
                 max(
                     0.45 * span.risk_score
                     + 0.25 * local_delta
                     + 0.20 * detection.judge_confidence
                     + 0.10 * toxicity
+                    + lexical_bonus
                     - 0.20 * factual_support,
                     0.0,
                 ),
@@ -39,6 +78,7 @@ class PriorityRanker:
                 + self.config.confidence_weight * consistency
                 + self.config.preserve_weight * preserve_bonus
                 - self.config.edit_cost_weight * edit_cost
+                - low_signal_penalty
             )
             if priority < self.config.min_priority:
                 continue
@@ -55,6 +95,8 @@ class PriorityRanker:
                         "length_cost": length_cost,
                         "key_info_cost": key_info_cost,
                         "structure_cost": structure_cost,
+                        "lexical_bonus": lexical_bonus,
+                        "low_signal_penalty": low_signal_penalty,
                     },
                 )
             )
@@ -108,3 +150,21 @@ class PriorityRanker:
         if position <= 0.2:
             return 0.4
         return 0.2
+
+    def _lexical_bonus(self, span: BiasSpan) -> float:
+        if "lexical_match" in span.source:
+            return 0.18
+        if "sentence_fallback" in span.source:
+            return 0.05
+        return 0.0
+
+    def _low_signal_penalty(self, span: BiasSpan) -> float:
+        lowered = span.text.lower().strip()
+        token_count = len([token for token in re.split(r"\s+", lowered) if token])
+        if "lexical_match" in span.source:
+            return 0.0
+        if lowered in self._LOW_SIGNAL_SPANS:
+            return 0.35
+        if token_count <= 1 and self._toxicity_proxy(span.text) == 0.0:
+            return 0.22
+        return 0.0

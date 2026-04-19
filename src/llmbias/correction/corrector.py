@@ -49,7 +49,7 @@ class BiasCorrector:
                 candidate_text,
                 working_candidates,
             )
-            if candidate_metrics.get("q_score", 0.0) >= best_metrics.get("q_score", 0.0):
+            if self._is_better_candidate(candidate_metrics, best_metrics):
                 best_text = candidate_text
                 best_metrics = candidate_metrics
                 passed = candidate_passed
@@ -75,3 +75,20 @@ class BiasCorrector:
                 "accepted_candidate_count": len(working_candidates),
             },
         )
+
+    def _is_better_candidate(self, candidate_metrics: dict[str, float], best_metrics: dict[str, float]) -> bool:
+        candidate_gain = candidate_metrics.get("fairness_gain", 0.0)
+        best_gain = best_metrics.get("fairness_gain", 0.0)
+        if candidate_gain > best_gain + 1e-6:
+            return True
+        if candidate_gain < best_gain - 1e-6:
+            return False
+
+        candidate_residual = candidate_metrics.get("residual_bias", 1.0)
+        best_residual = best_metrics.get("residual_bias", 1.0)
+        if candidate_residual < best_residual - 1e-6:
+            return True
+        if candidate_residual > best_residual + 1e-6:
+            return False
+
+        return candidate_metrics.get("q_score", 0.0) >= best_metrics.get("q_score", 0.0)

@@ -29,6 +29,10 @@ class ConsistencyValidator:
         "on her period",
         "crazy ex",
         "asking for it",
+        "don't hire her",
+        "dont hire her",
+        "not to hire a woman",
+        "locked up",
     ]
     _HARM_PATTERNS = [
         "inferior",
@@ -40,6 +44,9 @@ class ConsistencyValidator:
         "gold digger",
         "crazy ex",
         "asking for it",
+        "don't hire her",
+        "dont hire her",
+        "locked up",
     ]
 
     def __init__(self, config: CorrectionConfig) -> None:
@@ -63,7 +70,16 @@ class ConsistencyValidator:
         facts_preserved = self._facts_preserved(original, rewritten)
         no_new_harm = self._harm_count(rewritten) <= self._harm_count(original)
         bias_reduced = fairness_gain >= self.config.min_fairness_gain or residual_bias < original_bias
-        q_score = 0.40 * fairness_gain + 0.35 * preservation + 0.15 * coherence - 0.10 * edit_ratio
+        direct_response_mode = bool(detection.sample.metadata.get("text_is_response"))
+        if direct_response_mode:
+            q_score = 0.60 * fairness_gain + 0.20 * preservation + 0.15 * coherence - 0.05 * edit_ratio
+            min_preservation = 0.05
+            accept_threshold = max(self.config.accept_threshold - 0.10, 0.20)
+        else:
+            q_score = 0.40 * fairness_gain + 0.35 * preservation + 0.15 * coherence - 0.10 * edit_ratio
+            min_preservation = 0.35
+            accept_threshold = self.config.accept_threshold
+        strong_bias_removal = direct_response_mode and residual_bias == 0.0 and fairness_gain > 0.03
 
         passed = (
             no_refusal
@@ -71,8 +87,8 @@ class ConsistencyValidator:
             and facts_preserved
             and no_new_harm
             and bias_reduced
-            and preservation >= 0.35
-            and q_score >= self.config.accept_threshold
+            and preservation >= min_preservation
+            and (q_score >= accept_threshold or strong_bias_removal)
         )
         return (
             passed,

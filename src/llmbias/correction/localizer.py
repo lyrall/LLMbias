@@ -9,6 +9,51 @@ from llmbias.schemas import BiasDetectionResult, BiasSpan
 class BiasLocalizer:
     """Refine candidate spans with token/phrase alignment over counterfactual outputs."""
 
+    _ALIGNMENT_ALLOWLIST = {
+        "bossy",
+        "lazy",
+        "dangerous",
+        "inferior",
+        "incapable",
+        "unfit",
+        "stupid",
+    }
+    _LOW_SIGNAL_ALIGNMENT_TOKENS = {
+        "she",
+        "her",
+        "he",
+        "him",
+        "his",
+        "hers",
+        "women",
+        "woman",
+        "men",
+        "man",
+        "female",
+        "females",
+        "male",
+        "males",
+        "girl",
+        "girls",
+        "boy",
+        "boys",
+        "wife",
+        "husband",
+        "mother",
+        "father",
+        "daughter",
+        "daughters",
+        "son",
+        "sons",
+        "another",
+        "teacher",
+        "teachers",
+        "people",
+        "person",
+        "individual",
+        "individuals",
+    }
+
     def localize(self, detection: BiasDetectionResult) -> list[BiasSpan]:
         spans = [self._ensure_metadata(span) for span in detection.candidate_spans]
         spans.extend(self._alignment_spans(detection))
@@ -91,6 +136,8 @@ class BiasLocalizer:
                 continue
 
             token_count = max(i2 - i1, 1)
+            if self._should_skip_alignment_snippet(snippet, token_count):
+                continue
             spans.append(
                 BiasSpan(
                     text=snippet,
@@ -109,6 +156,16 @@ class BiasLocalizer:
                 )
             )
         return spans
+
+    def _should_skip_alignment_snippet(self, snippet: str, token_count: int) -> bool:
+        lowered = snippet.lower().strip()
+        if lowered in self._ALIGNMENT_ALLOWLIST:
+            return False
+        if token_count <= 1 and lowered in self._LOW_SIGNAL_ALIGNMENT_TOKENS:
+            return True
+        if token_count <= 1 and re.fullmatch(r"[a-z]+", lowered) and lowered not in self._ALIGNMENT_ALLOWLIST:
+            return True
+        return False
 
     def _merge_spans(self, spans: list[BiasSpan]) -> list[BiasSpan]:
         if not spans:
