@@ -11,3 +11,6 @@ class DetectionRunner:
     def run_single(self, prompt: str, prompt_id: str = "detect-001") -> dict:
         result = self.pipeline.run(PromptSample(prompt_id=prompt_id, text=prompt))
         return result.to_dict()
+
+    def run_sample(self, sample: PromptSample) -> dict:
+        return self.pipeline.run(sample).to_dict()

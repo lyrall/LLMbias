@@ -5,61 +5,73 @@ from llmbias.correction.localizer import BiasLocalizer
 from llmbias.correction.priority import PriorityRanker
 from llmbias.correction.rewriter import MinimalEditor
 from llmbias.correction.validator import ConsistencyValidator
+from llmbias.models.base import BlackBoxLLM
 from llmbias.schemas import BiasDetectionResult, RewriteResult
 
 
 class BiasCorrector:
-    def __init__(self, config: CorrectionConfig) -> None:
+    def __init__(self, config: CorrectionConfig, model: BlackBoxLLM | None = None) -> None:
         self.config = config
         self.localizer = BiasLocalizer()
         self.ranker = PriorityRanker(config)
-        self.rewriter = MinimalEditor()
-        self.validator = ConsistencyValidator()
+        self.rewriter = MinimalEditor(model=model)
+        self.validator = ConsistencyValidator(config)
 
     def run(self, detection: BiasDetectionResult) -> RewriteResult | None:
         if not detection.is_biased:
             return None
 
         spans = self.localizer.localize(detection)
-        ranked = self.ranker.rank(spans)
+        ranked = self.ranker.rank(spans, detection)
         if not ranked:
             return None
 
-        rewritten = detection.original_response.text
-        best_text = rewritten
-        best_metrics = {"preserve": 1.0, "residual_bias": detection.score.overall}
+        working_candidates = list(ranked)
+        best_text = detection.original_response.text
+        best_metrics = {
+            "preserve": 1.0,
+            "residual_bias": detection.score.overall,
+            "fairness_gain": 0.0,
+            "edit_ratio": 0.0,
+            "coherence": 1.0,
+            "q_score": 0.0,
+        }
         passed = False
 
         for _ in range(self.config.max_passes):
-            candidate_text = self.rewriter.rewrite(rewritten, ranked)
-            candidate_passed, candidate_metrics = self.validator.validate(
+            candidate_text = self.rewriter.rewrite(
                 detection.original_response.text,
-                candidate_text,
+                working_candidates,
+                detection,
             )
-            best_text = candidate_text
-            best_metrics = candidate_metrics
-            passed = candidate_passed
+            candidate_passed, candidate_metrics = self.validator.validate(
+                detection,
+                candidate_text,
+                working_candidates,
+            )
+            if candidate_metrics.get("q_score", 0.0) >= best_metrics.get("q_score", 0.0):
+                best_text = candidate_text
+                best_metrics = candidate_metrics
+                passed = candidate_passed
             if candidate_passed:
                 break
-            rewritten = candidate_text
+            if len(working_candidates) > 1:
+                working_candidates = working_candidates[:-1]
 
-        fairness_gain = max(detection.score.overall - best_metrics.get("residual_bias", 0.0), 0.0)
-        edit_ratio = min(
-            abs(len(best_text) - len(detection.original_response.text))
-            / max(len(detection.original_response.text), 1),
-            1.0,
-        )
         return RewriteResult(
             original_text=detection.original_response.text,
             rewritten_text=best_text,
-            edited_spans=ranked,
-            fairness_gain=fairness_gain,
+            edited_spans=working_candidates if passed else ranked[: len(working_candidates)],
+            fairness_gain=best_metrics.get("fairness_gain", 0.0),
             preservation_score=best_metrics["preserve"],
-            edit_ratio=edit_ratio,
+            edit_ratio=best_metrics.get("edit_ratio", 0.0),
             validation_passed=passed,
             metadata={
                 "max_passes": self.config.max_passes,
                 "residual_bias": best_metrics.get("residual_bias", 0.0),
                 "judge_confidence": detection.judge_confidence,
+                "coherence": best_metrics.get("coherence", 0.0),
+                "q_score": best_metrics.get("q_score", 0.0),
+                "accepted_candidate_count": len(working_candidates),
             },
         )

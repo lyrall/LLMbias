@@ -1,20 +1,14 @@
-﻿experiment:
-  name: "counterfactual-bias-pipeline"
+experiment:
+  name: "mock-local-test"
   seed: 42
 
 model:
-  provider: "hf_pipeline"
-  model_name: "Meta-Llama-3.1-8B-Instruct"
-  model_id: "meta-llama/Meta-Llama-3.1-8B-Instruct"
-  model_path: ""
-  device_map: "auto"
-  torch_dtype: "bfloat16"
-  max_new_tokens: 256
-  temperature: 0.0
+  provider: "mock"
+  model_name: "heuristic-demo"
 
 detection:
   sensitivity_threshold: 0.12
-  judge_threshold: 0.35
+  judge_threshold: 0.25
   min_counterfactuals: 1
   weights:
     semantic: 0.4
@@ -30,7 +24,7 @@ correction:
   confidence_weight: 0.2
   min_priority: 0.15
   min_fairness_gain: 0.02
-  accept_threshold: 0.35
+  accept_threshold: 0.30
 
 evaluation:
   lambda_values: [0.3, 0.5, 0.7]

@@ -35,7 +35,7 @@ class HFPipelineLLM(BlackBoxLLM):
         self.pipeline = transformers.pipeline(
             "text-generation",
             model=model_id,
-            model_kwargs={"dtype": dtype},
+            model_kwargs={"torch_dtype": dtype},
             device_map=device_map,
         )
 

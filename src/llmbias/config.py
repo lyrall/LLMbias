@@ -30,11 +30,14 @@ class DetectionConfig:
 @dataclass(slots=True)
 class CorrectionConfig:
     max_passes: int = 2
+    max_candidate_spans: int = 3
     preserve_weight: float = 0.5
     fair_weight: float = 0.3
     edit_cost_weight: float = 0.2
     confidence_weight: float = 0.2
     min_priority: float = 0.2
+    min_fairness_gain: float = 0.02
+    accept_threshold: float = 0.35
 
 
 @dataclass(slots=True)

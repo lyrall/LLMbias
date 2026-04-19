@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 
 from llmbias.config import ExperimentConfig, load_config
+from llmbias.experiments.correction_file_runner import CorrectionFileRunner
 from llmbias.experiments.correction_runner import CorrectionRunner
 from llmbias.experiments.dataset_runner import DatasetRunner
 from llmbias.experiments.detection_runner import DetectionRunner
@@ -29,6 +31,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to experiment config",
     )
 
+    detect_dataset_parser = subparsers.add_parser(
+        "detect-dataset",
+        help="Run only the detection stage on a local dataset",
+    )
+    detect_dataset_parser.add_argument("--dataset", choices=["bbq", "bold", "toxigen"], required=True, help="Dataset name")
+    detect_dataset_parser.add_argument("--dataset-path", required=True, help="Path to local dataset directory or file")
+    detect_dataset_parser.add_argument("--split", default="test", help="Dataset split name")
+    detect_dataset_parser.add_argument(
+        "--subset",
+        default="",
+        help="Optional dataset subset. For BBQ use values like Age_ambig; for BOLD use values like gender; for ToxiGen use values like hate_women.",
+    )
+    detect_dataset_parser.add_argument("--limit", type=int, default=None, help="Optional number of samples to run")
+    detect_dataset_parser.add_argument("--output", default="", help="Optional JSONL output path")
+    detect_dataset_parser.add_argument(
+        "--config",
+        default="configs/default.yaml",
+        help="Path to experiment config",
+    )
+
     correct_parser = subparsers.add_parser("correct", help="Run only research content two")
     correct_parser.add_argument("--response", required=True, help="Biased response text to rewrite")
     correct_parser.add_argument("--risk-score", type=float, default=0.5, help="Bias risk score")
@@ -36,6 +58,18 @@ def build_parser() -> argparse.ArgumentParser:
     correct_parser.add_argument("--confidence", type=float, default=0.8, help="Bootstrap confidence")
     correct_parser.add_argument("--prompt", default="", help="Optional source prompt for bookkeeping")
     correct_parser.add_argument(
+        "--config",
+        default="configs/default.yaml",
+        help="Path to experiment config",
+    )
+
+    rewrite_file_parser = subparsers.add_parser(
+        "rewrite-file",
+        help="Run the rewrite stage from detection JSONL output",
+    )
+    rewrite_file_parser.add_argument("--input", required=True, help="Path to detection JSONL")
+    rewrite_file_parser.add_argument("--output", default="", help="Optional JSONL output path")
+    rewrite_file_parser.add_argument(
         "--config",
         default="configs/default.yaml",
         help="Path to experiment config",
@@ -50,13 +84,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     dataset_parser = subparsers.add_parser("run-dataset", help="Run the full pipeline on a local dataset")
-    dataset_parser.add_argument("--dataset", choices=["bbq", "bold"], required=True, help="Dataset name")
+    dataset_parser.add_argument("--dataset", choices=["bbq", "bold", "toxigen"], required=True, help="Dataset name")
     dataset_parser.add_argument("--dataset-path", required=True, help="Path to local dataset directory or file")
     dataset_parser.add_argument("--split", default="test", help="Dataset split name")
     dataset_parser.add_argument(
         "--subset",
         default="",
-        help="Optional dataset subset. For BBQ use values like Age_ambig; for BOLD use values like gender.",
+        help="Optional dataset subset. For BBQ use values like Age_ambig; for BOLD use values like gender; for ToxiGen use values like hate_women.",
     )
     dataset_parser.add_argument("--limit", type=int, default=None, help="Optional number of samples to run")
     dataset_parser.add_argument("--output", default="", help="Optional JSONL output path")
@@ -72,15 +106,44 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     config = _safe_load_config(getattr(args, "config", "configs/default.yaml"))
-    model = _build_model(config)
 
     if args.command == "detect":
+        model = _build_model(config)
         pipeline = DetectionPipeline(model=model, config=config.detection)
         runner = DetectionRunner(pipeline=pipeline)
         result = runner.run_single(args.prompt)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        _emit_json(result)
+    elif args.command == "detect-dataset":
+        model = _build_model(config)
+        pipeline = DetectionPipeline(model=model, config=config.detection)
+        runner = DetectionRunner(pipeline=pipeline)
+        dataset_runner = DatasetRunner(runner=runner)
+        if args.dataset == "bbq":
+            results = dataset_runner.run_bbq(
+                dataset_path=args.dataset_path,
+                split=args.split,
+                subset=args.subset,
+                limit=args.limit,
+                output_path=args.output or None,
+            )
+        elif args.dataset == "bold":
+            results = dataset_runner.run_bold(
+                dataset_path=args.dataset_path,
+                subset=args.subset,
+                limit=args.limit,
+                output_path=args.output or None,
+            )
+        else:
+            results = dataset_runner.run_toxigen(
+                dataset_path=args.dataset_path,
+                subset=args.subset,
+                limit=args.limit,
+                output_path=args.output or None,
+            )
+        _emit_json(results)
     elif args.command == "correct":
-        pipeline = CorrectionPipeline(config=config.correction)
+        model = _safe_build_optional_model(config)
+        pipeline = CorrectionPipeline(config=config.correction, model=model)
         runner = CorrectionRunner(pipeline=pipeline)
         result = runner.run_single(
             response_text=args.response,
@@ -89,13 +152,21 @@ def main() -> None:
             confidence=args.confidence,
             prompt=args.prompt,
         )
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        _emit_json(result)
+    elif args.command == "rewrite-file":
+        model = _safe_build_optional_model(config)
+        pipeline = CorrectionPipeline(config=config.correction, model=model)
+        runner = CorrectionFileRunner(pipeline=pipeline, lambda_values=config.evaluation.lambda_values)
+        results = runner.run_file(args.input, output_path=args.output or None)
+        _emit_json(results)
     elif args.command == "run":
+        model = _build_model(config)
         pipeline = EndToEndBiasPipeline(model=model, config=config)
         runner = EndToEndRunner(pipeline=pipeline, config=config)
         result = runner.run_single(args.prompt)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        _emit_json(result)
     elif args.command == "run-dataset":
+        model = _build_model(config)
         pipeline = EndToEndBiasPipeline(model=model, config=config)
         runner = EndToEndRunner(pipeline=pipeline, config=config)
         dataset_runner = DatasetRunner(runner=runner)
@@ -107,14 +178,21 @@ def main() -> None:
                 limit=args.limit,
                 output_path=args.output or None,
             )
-        else:
+        elif args.dataset == "bold":
             results = dataset_runner.run_bold(
                 dataset_path=args.dataset_path,
                 subset=args.subset,
                 limit=args.limit,
                 output_path=args.output or None,
             )
-        print(json.dumps(results, ensure_ascii=False, indent=2))
+        else:
+            results = dataset_runner.run_toxigen(
+                dataset_path=args.dataset_path,
+                subset=args.subset,
+                limit=args.limit,
+                output_path=args.output or None,
+            )
+        _emit_json(results)
 
 
 def _safe_load_config(path: str) -> ExperimentConfig:
@@ -147,6 +225,21 @@ def _build_model(config: ExperimentConfig):
             temperature=config.model.temperature,
         )
     raise ValueError(f"Unsupported model provider: {config.model.provider}")
+
+
+def _safe_build_optional_model(config: ExperimentConfig):
+    try:
+        return _build_model(config)
+    except Exception:
+        return None
+
+
+def _emit_json(payload) -> None:
+    rendered = json.dumps(payload, ensure_ascii=False, indent=2)
+    try:
+        print(rendered)
+    except UnicodeEncodeError:
+        sys.stdout.buffer.write(rendered.encode("utf-8", errors="replace") + b"\n")
 
 
 if __name__ == "__main__":
