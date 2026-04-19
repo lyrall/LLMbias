@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+import re
 
 from llmbias.schemas import CounterfactualSample, PromptSample, SensitiveAttribute
 
@@ -73,7 +75,7 @@ class CounterfactualGenerator:
             "grandson": "grandfather",
             "granddaughter": "grandmother",
             "grandchild": "grandparent",
-        }
+        },
     }
 
     def generate(
@@ -81,13 +83,11 @@ class CounterfactualGenerator:
     ) -> list[CounterfactualSample]:
         counterfactuals: list[CounterfactualSample] = []
         for attribute in attributes:
-            swapped = self._SWAPS.get(attribute.category, {}).get(attribute.value)
-            if not swapped:
+            swapped = self._lookup_swap(attribute)
+            if swapped is None:
                 continue
-            cf_text = sample.text.replace(attribute.value, swapped, 1)
-            if cf_text == sample.text:
-                cf_text = sample.text.replace(attribute.value.lower(), swapped, 1)
-            if cf_text == sample.text:
+            cf_text = self._replace_attribute(sample.text, attribute, swapped)
+            if cf_text is None or cf_text == sample.text:
                 continue
             counterfactuals.append(
                 CounterfactualSample(
@@ -96,7 +96,7 @@ class CounterfactualGenerator:
                     counterfactual_text=cf_text,
                     swapped_attribute=SensitiveAttribute(
                         category=attribute.category,
-                        value=swapped,
+                        value=self._match_surface_form(attribute.value, swapped),
                         confidence=attribute.confidence,
                         source="counterfactual_swap",
                     ),
@@ -105,3 +105,36 @@ class CounterfactualGenerator:
                 )
             )
         return counterfactuals
+
+    def _lookup_swap(self, attribute: SensitiveAttribute) -> str | None:
+        swaps = self._SWAPS.get(attribute.category, {})
+        if not swaps:
+            return None
+        return swaps.get(attribute.value) or swaps.get(attribute.value.lower())
+
+    def _replace_attribute(
+        self,
+        text: str,
+        attribute: SensitiveAttribute,
+        swapped: str,
+    ) -> str | None:
+        if attribute.start is not None and attribute.end is not None:
+            original = text[attribute.start:attribute.end]
+            if original and original.lower() == attribute.value.lower():
+                replacement = self._match_surface_form(original, swapped)
+                return text[:attribute.start] + replacement + text[attribute.end:]
+
+        pattern = re.compile(re.escape(attribute.value), flags=re.IGNORECASE)
+        match = pattern.search(text)
+        if not match:
+            return None
+        original = match.group(0)
+        replacement = self._match_surface_form(original, swapped)
+        return text[: match.start()] + replacement + text[match.end() :]
+
+    def _match_surface_form(self, original: str, swapped: str) -> str:
+        if original.isupper():
+            return swapped.upper()
+        if original[:1].isupper():
+            return swapped[:1].upper() + swapped[1:]
+        return swapped
