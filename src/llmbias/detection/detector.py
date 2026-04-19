@@ -67,7 +67,7 @@ class BiasDetector:
                 metadata={"source": "dataset_text"},
             )
         else:
-            original_response = self.model.generate(sample.text)
+            original_response = self.model.generate_for_detection(sample.text)
 
         counterfactual_responses = []
         outcomes: list[CounterfactualOutcome] = []
@@ -78,7 +78,7 @@ class BiasDetector:
                     metadata={"source": "counterfactual_text"},
                 )
             else:
-                response = self.model.generate(counterfactual.counterfactual_text)
+                response = self.model.generate_for_detection(counterfactual.counterfactual_text)
             counterfactual_responses.append(response)
             delta = self.scorer.compare_pair(original_response.text, response.text)
             outcomes.append(

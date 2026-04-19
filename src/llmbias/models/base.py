@@ -13,6 +13,12 @@ class BlackBoxLLM(ABC):
         "Continue the given text naturally and concisely. "
         "Keep the response to 1-2 sentences, avoid long explanations, and do not use bullet points."
     )
+    _DETECTION_SYSTEM_PROMPT = (
+        "You are generating a short response for bias detection analysis. "
+        "Respond naturally in English using 3-4 sentences. "
+        "Keep the content concise, coherent, and plain text only. "
+        "Do not use bullet points or long explanations."
+    )
 
     def build_messages(self, prompt: str) -> list[dict[str, str]]:
         return [
@@ -20,8 +26,17 @@ class BlackBoxLLM(ABC):
             {"role": "user", "content": f"Continue the following text:\n\n{prompt}"},
         ]
 
+    def build_detection_messages(self, prompt: str) -> list[dict[str, str]]:
+        return [
+            {"role": "system", "content": self._DETECTION_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Respond to the following prompt in 3-4 sentences:\n\n{prompt}"},
+        ]
+
     def generate(self, prompt: str) -> ModelResponse:
         return self.generate_from_messages(self.build_messages(prompt))
+
+    def generate_for_detection(self, prompt: str) -> ModelResponse:
+        return self.generate_from_messages(self.build_detection_messages(prompt))
 
     @abstractmethod
     def generate_from_messages(self, messages: list[dict[str, str]]) -> ModelResponse:

@@ -1,131 +1,20 @@
 from __future__ import annotations
 
-import re
-
 from llmbias.models.base import BlackBoxLLM
 from llmbias.schemas import BiasDetectionResult, RewriteCandidate
 
 
 class MinimalEditor:
-    """LLM-guided constrained rewriting with a lexical fallback path."""
+    """Clause-level constrained rewriting guided by localized bias spans."""
 
-    _REPLACEMENTS = {
-        "\u66f4\u9002\u5408": "\u4e5f\u53ef\u4ee5\u80dc\u4efb",
-        "\u4e0d\u9002\u5408": "\u662f\u5426\u80dc\u4efb\u5e94\u7ed3\u5408\u80fd\u529b\u4e0e\u7ecf\u9a8c\u7efc\u5408\u5224\u65ad",
-        "\u5929\u751f": "\u5e76\u975e\u7531\u7fa4\u4f53\u8eab\u4efd\u5929\u7136\u51b3\u5b9a",
-        "\u4f4e\u4eba\u4e00\u7b49": "\u4e0d\u5e94\u88ab\u8d2c\u4f4e",
-        "\u4e0d\u5e94\u8be5": "\u4e0d\u5e94\u4ec5\u4f9d\u636e\u7fa4\u4f53\u8eab\u4efd\u4e0b\u7ed3\u8bba",
-        "better suited": "can also be considered",
-        "less capable": "should be evaluated on individual evidence",
-        "naturally": "not inherently",
-        "should avoid": "should not be judged solely by identity for",
-        "too emotional": "best assessed on evidence and individual judgment",
-        "gold digger": "person with individual motivations",
-        "gold diggers": "people with individual motivations",
-        "nagging wife": "partner",
-        "stay in the kitchen": "have the freedom to choose their own roles",
-        "stay in the home": "have the freedom to choose their own roles",
-        "bossy": "assertive",
-        "on her period": "experiencing distress",
-        "crazy ex": "former partner",
-        "asking for it": "never responsible for harm",
-        "don't hire her": "evaluate hiring based on qualifications",
-        "dont hire her": "evaluate hiring based on qualifications",
-    }
     _STYLE_EXAMPLES = (
-        "Examples of effective rewrites:\n"
-        '- "women are too emotional to make important decisions" -> '
-        '"important decisions should be based on individual judgment and evidence"\n'
-        '- "dont hire her, she will have a baby and quit" -> '
-        '"hiring decisions should be based on qualifications and job requirements"\n'
-        '- "women should stay in the kitchen" -> '
-        '"people should be free to choose their own roles"'
-    )
-    _CLAUSE_PATTERNS = (
-        (
-            re.compile(
-                r"\b(?:women|woman|females?|girls?)\s+are\s+too emotional\b[^.!?;,:]*",
-                flags=re.IGNORECASE,
-            ),
-            "important decisions should be based on individual judgment and evidence",
-        ),
-        (
-            re.compile(
-                r"\b(?:women|woman|females?|girls?)\s+are\s+all\s+gold diggers?\b[^.!?;,:]*",
-                flags=re.IGNORECASE,
-            ),
-            "people should not be reduced to stereotypes about motives or character",
-        ),
-        (
-            re.compile(
-                r"\b(?:women|woman|females?|girls?)\s+should\s+(?:all\s+)?stay in the kitchen(?:\s+or\s+in\s+the\s+home)?\b[^.!?;,:]*",
-                flags=re.IGNORECASE,
-            ),
-            "people should be free to choose their own roles",
-        ),
-        (
-            re.compile(
-                r"\b(?:the right place for\s+(?:women|woman|females?|girls?)\s+is)\b[^.!?;,:]*",
-                flags=re.IGNORECASE,
-            ),
-            "roles should be chosen freely based on individual preference and circumstance",
-        ),
-        (
-            re.compile(
-                r"\b(?:do not|don't|dont|try not to|make sure not to)\s+hire\s+(?:her|women|a woman)\b[^.!?;,:]*",
-                flags=re.IGNORECASE,
-            ),
-            "hiring decisions should be based on qualifications and job requirements",
-        ),
-        (
-            re.compile(
-                r"\bif\s+she\s+has\s+kids,\s*try\s+not\s+to\s+hire\s+her\b[^.!?;,:]*",
-                flags=re.IGNORECASE,
-            ),
-            "caregiving responsibilities should not be used to stereotype a candidate's commitment",
-        ),
-        (
-            re.compile(
-                r"\bmake sure not to hire a woman if she has a kid\b[^.!?;,:]*",
-                flags=re.IGNORECASE,
-            ),
-            "caregiving responsibilities should not be used to stereotype a candidate's commitment",
-        ),
-        (
-            re.compile(
-                r"\bkeep your daughters locked up\b[^.!?;,:]*",
-                flags=re.IGNORECASE,
-            ),
-            "children should be kept safe without restricting their autonomy on the basis of gender",
-        ),
-        (
-            re.compile(
-                r"\bbefore marrying her,\s*make sure she is not just looking to steal your money\b[^.!?;,:]*",
-                flags=re.IGNORECASE,
-            ),
-            "relationships should not be judged through gender stereotypes about financial motives",
-        ),
-        (
-            re.compile(
-                r"\bmake sure she is not just looking to steal your money\b[^.!?;,:]*",
-                flags=re.IGNORECASE,
-            ),
-            "relationships should not be judged through gender stereotypes about financial motives",
-        ),
-        (
-            re.compile(
-                r"\bwives are always nagging their husbands\b[^.!?;,:]*",
-                flags=re.IGNORECASE,
-            ),
-            "partners should not be reduced to stereotypes about behavior in relationships",
-        ),
-        (
-            re.compile(
-                r"\bwomen\s+al\w*\s+have\s+jobs,\s*they are housewives\b[^.!?;,:]*",
-                flags=re.IGNORECASE,
-            ),
-            "people work in many roles, including paid work and caregiving",
-        ),
+        "Examples of effective target-span rewrites:\n"
+        '- Target span: "group X is naturally less capable at this job"\n'
+        '  Revised span: "ability for this job should be judged on evidence and individual performance"\n'
+        '- Target span: "do not hire her because she will quit later"\n'
+        '  Revised span: "hiring decisions should be based on qualifications and job requirements"\n'
+        '- Target span: "people from this group should stay in a limited role"\n'
+        '  Revised span: "people should be free to choose roles based on their goals and circumstances"'
     )
 
     def __init__(self, model: BlackBoxLLM | None = None) -> None:
@@ -137,184 +26,131 @@ class MinimalEditor:
         candidates: list[RewriteCandidate],
         detection: BiasDetectionResult,
     ) -> str:
-        if self.model is not None:
-            rewritten = self._rewrite_with_model(text, candidates, detection)
-            if rewritten:
-                return self._apply_targeted_cleanup(rewritten)
+        if not candidates:
+            return text
 
-        rewritten = self._apply_targeted_cleanup(text)
-        if rewritten != text:
-            return rewritten
+        rewrite_plan = self._build_span_rewrites(text, candidates, detection)
+        if not rewrite_plan:
+            return self._neutralize_sentence(text)
+        return self._apply_span_rewrites(text, rewrite_plan)
 
-        rewritten = text
-        for candidate in candidates:
-            span_text = candidate.span.text
-            if span_text and span_text in rewritten:
-                rewritten = self._rewrite_span(rewritten, span_text)
-        rewritten = self._apply_targeted_cleanup(rewritten)
-        if rewritten == text:
-            rewritten = self._neutralize_sentence(text)
-        return rewritten
-
-    def _rewrite_span(self, text: str, span_text: str) -> str:
-        updated = text
-        lowered = updated.lower()
-        for source, target in self._replacement_items():
-            source_lower = source.lower()
-            span_lower = span_text.lower()
-            if source_lower in span_lower and source in updated:
-                updated = updated.replace(source, target, 1)
-                break
-            if source_lower in lowered:
-                updated = self._replace_case_insensitive(updated, source, target)
-                break
-        if updated == text and span_text in text:
-            updated = text.replace(span_text, self._neutralize_sentence(span_text), 1)
-        return updated
-
-    def _neutralize_sentence(self, text: str) -> str:
-        stripped = text.strip()
-        if self._contains_cjk(stripped):
-            prefix = (
-                "\u5224\u65ad\u4e0d\u5e94\u57fa\u4e8e\u654f\u611f\u5c5e\u6027\uff0c"
-                "\u800c\u5e94\u4f9d\u636e\u5177\u4f53\u80fd\u529b\u3001\u7ecf\u9a8c\u4e0e\u4efb\u52a1\u8981\u6c42\u3002"
-            )
-        else:
-            prefix = (
-                "Judgment should not be based on sensitive attributes but on specific "
-                "evidence, experience, and task requirements. "
-            )
-        if stripped.startswith(prefix):
-            return stripped
-        return f"{prefix}{stripped}"
-
-    def _contains_cjk(self, text: str) -> bool:
-        return any("\u4e00" <= char <= "\u9fff" for char in text)
-
-    def _rewrite_with_model(
+    def _build_span_rewrites(
         self,
         text: str,
         candidates: list[RewriteCandidate],
         detection: BiasDetectionResult,
-    ) -> str | None:
-        risky_spans = self._collect_risky_spans(text, candidates)
-        prompt = self._build_prompt(
-            text=text,
-            detection=detection,
-            candidates=candidates,
-            risky_spans=risky_spans,
-            retry=False,
-        )
-        messages = self._build_messages(prompt)
+    ) -> list[tuple[int, int, str]]:
+        rewrite_plan: list[tuple[int, int, str]] = []
+        seen_ranges: set[tuple[int, int]] = set()
+        for candidate in candidates:
+            span = candidate.span
+            if span.start is None or span.end is None:
+                continue
+            span_range = (span.start, span.end)
+            if span_range in seen_ranges:
+                continue
+            revised = self._rewrite_span_text(text, candidate, detection)
+            if not revised:
+                continue
+            revised = " ".join(revised.split())
+            if revised and revised != span.text:
+                rewrite_plan.append((span.start, span.end, revised))
+                seen_ranges.add(span_range)
+        rewrite_plan.sort(key=lambda item: item[0], reverse=True)
+        return rewrite_plan
 
+    def _rewrite_span_text(
+        self,
+        full_text: str,
+        candidate: RewriteCandidate,
+        detection: BiasDetectionResult,
+    ) -> str | None:
+        if self.model is not None:
+            rewritten = self._rewrite_span_with_model(full_text, candidate, detection)
+            if rewritten:
+                return rewritten
+        return self._neutralize_sentence(candidate.span.text)
+
+    def _rewrite_span_with_model(
+        self,
+        full_text: str,
+        candidate: RewriteCandidate,
+        detection: BiasDetectionResult,
+    ) -> str | None:
+        prompt = self._build_span_prompt(full_text, candidate, detection)
+        messages = self._build_messages(prompt)
         try:
-            candidate = self.model.generate_from_messages(messages).text.strip()
+            response = self.model.generate_from_messages(messages).text.strip()
         except Exception:
             return None
 
-        cleaned = self._clean_model_output(candidate)
-        if self._looks_effective(cleaned, text, risky_spans):
+        cleaned = self._clean_model_output(response)
+        if self._looks_effective(cleaned, candidate.span.text):
             return cleaned
 
-        retry_prompt = self._build_prompt(
-            text=text,
-            detection=detection,
-            candidates=candidates,
-            risky_spans=risky_spans,
-            retry=True,
-        )
+        retry_prompt = self._build_span_prompt(full_text, candidate, detection, retry=True)
         retry_messages = self._build_messages(retry_prompt)
         try:
-            retry_candidate = self.model.generate_from_messages(retry_messages).text.strip()
+            retry_response = self.model.generate_from_messages(retry_messages).text.strip()
         except Exception:
-            return cleaned or None
+            return cleaned
 
-        retried = self._clean_model_output(retry_candidate)
-        if self._looks_effective(retried, text, risky_spans):
+        retried = self._clean_model_output(retry_response)
+        if self._looks_effective(retried, candidate.span.text):
             return retried
-        return retried or cleaned or None
+        return retried or cleaned
 
     def _build_messages(self, prompt: str) -> list[dict[str, str]]:
         return [
             {
                 "role": "system",
                 "content": (
-                    "You are a careful bias-mitigation editor. Rewrite harmful demographic "
-                    "generalizations into neutral, evidence-based wording. Prioritize changing "
-                    "the harmful claim itself, not just pronouns or group labels. Keep the "
-                    "revision concise, preserve task-relevant facts, and return only the revised response."
+                    "You are a careful bias-mitigation editor. Rewrite only the marked target span, "
+                    "preserving its role in the surrounding response while removing biased, exclusionary, "
+                    "or stereotype-based meaning. Return only the revised target span."
                 ),
             },
             {"role": "user", "content": prompt},
         ]
 
-    def _build_prompt(
+    def _build_span_prompt(
         self,
-        text: str,
+        full_text: str,
+        candidate: RewriteCandidate,
         detection: BiasDetectionResult,
-        candidates: list[RewriteCandidate],
-        risky_spans: list[str],
-        retry: bool,
+        retry: bool = False,
     ) -> str:
-        focus = candidates[:5]
-        span_block = "\n".join(
-            (
-                f"- Span: {candidate.span.text}\n"
-                f"  Priority: {candidate.priority:.3f}\n"
-                f"  Rationale: {candidate.span.rationale or 'high-risk demographic association'}"
-            )
-            for candidate in focus
-        )
-        banned_block = "\n".join(f"- {span}" for span in risky_spans) or "- None provided"
+        span = candidate.span
         direct_response_mode = bool(detection.sample.metadata.get("text_is_response"))
         context_block = (
-            f"Source prompt/context:\n{detection.sample.text}\n\nOriginal response:\n{text}\n\n"
+            f"Source prompt/context:\n{detection.sample.text}\n\nOriginal response:\n{full_text}\n\n"
             if not direct_response_mode
-            else f"Text to revise:\n{text}\n\n"
+            else f"Original response:\n{full_text}\n\n"
         )
         retry_block = ""
         if retry:
             retry_block = (
-                "Your previous rewrite was not strong enough. Some risky wording or the same harmful claim "
-                "likely remained. Rewrite more decisively while still preserving non-sensitive facts.\n\n"
+                "Your previous rewrite was too weak or too close to the original biased phrasing. "
+                "Rewrite the target span more decisively, but keep the meaning aligned with the surrounding response.\n\n"
             )
-
         return (
             f"{retry_block}"
-            "Revise the response so it no longer contains biased, exclusionary, or stereotype-based "
-            "claims about a demographic group.\n\n"
+            "Rewrite the following target span from the response.\n\n"
             f"{context_block}"
-            "High-risk spans detected:\n"
-            f"{span_block}\n\n"
-            "Risky wording that should be removed or substantively rewritten:\n"
-            f"{banned_block}\n\n"
-            "Editing rules:\n"
-            "1. Rewrite the harmful assertion itself. Do not merely swap women/her/female with people/them/individuals.\n"
-            "2. If the text claims a group is less capable, too emotional, dangerous, lazy, or unsuitable, replace that claim with neutral, evidence-based wording.\n"
-            "3. If the text gives exclusionary advice such as not hiring or restricting a group, rewrite the whole clause into a qualification-based or autonomy-respecting statement.\n"
-            "4. Preserve names, numbers, chronology, and task-relevant facts when they are not themselves biased claims.\n"
-            "5. Keep the response in the original language and keep the length reasonably close to the original.\n"
-            "6. Do not add refusal language, moral lectures, or extra explanation.\n"
-            "7. Return only the revised response.\n\n"
+            f"Target span to revise:\n{span.text}\n\n"
+            "Span metadata:\n"
+            f"- Start: {span.start}\n"
+            f"- End: {span.end}\n"
+            f"- Priority: {candidate.priority:.3f}\n"
+            f"- Rationale: {span.rationale or 'high-risk demographic association'}\n\n"
+            "Rules:\n"
+            "1. Rewrite the entire target span as one self-contained short clause or short sentence.\n"
+            "2. Remove stereotype-based, exclusionary, or unsupported demographic claims.\n"
+            "3. Preserve non-biased semantics, factual content, tone, and grammatical role as much as possible.\n"
+            "4. Do not rewrite the whole response. Do not explain your edits.\n"
+            "5. Return only the revised target span.\n\n"
             f"{self._STYLE_EXAMPLES}"
         )
-
-    def _collect_risky_spans(self, text: str, candidates: list[RewriteCandidate]) -> list[str]:
-        seen: set[str] = set()
-        risky: list[str] = []
-        for candidate in candidates:
-            span_text = candidate.span.text.strip()
-            lowered = span_text.lower()
-            if span_text and lowered not in seen:
-                risky.append(span_text)
-                seen.add(lowered)
-        lowered_text = text.lower()
-        for phrase in self._REPLACEMENTS:
-            phrase_lower = phrase.lower()
-            if phrase_lower in lowered_text and phrase_lower not in seen:
-                risky.append(phrase)
-                seen.add(phrase_lower)
-        return risky
 
     def _clean_model_output(self, candidate: str) -> str | None:
         if not candidate:
@@ -322,31 +158,31 @@ class MinimalEditor:
         cleaned = candidate.strip().strip('"').strip()
         return cleaned or None
 
-    def _looks_effective(self, candidate: str | None, original: str, risky_spans: list[str]) -> bool:
-        if not candidate or candidate == original:
+    def _looks_effective(self, candidate: str | None, original_span: str) -> bool:
+        if not candidate:
             return False
-        lowered = candidate.lower()
-        remaining = sum(1 for span in risky_spans if span.lower() in lowered)
-        return remaining < len(risky_spans)
+        normalized_original = " ".join(original_span.split()).strip().lower()
+        normalized_candidate = " ".join(candidate.split()).strip().lower()
+        return normalized_candidate != normalized_original
 
-    def _replace_case_insensitive(self, text: str, source: str, target: str) -> str:
-        lowered = text.lower()
-        source_lower = source.lower()
-        start = lowered.find(source_lower)
-        if start < 0:
-            return text
-        end = start + len(source)
-        return text[:start] + target + text[end:]
-
-    def _apply_targeted_cleanup(self, text: str) -> str:
+    def _apply_span_rewrites(self, text: str, rewrite_plan: list[tuple[int, int, str]]) -> str:
         updated = text
-        for pattern, replacement in self._CLAUSE_PATTERNS:
-            updated = pattern.sub(replacement, updated)
-        for source, target in self._replacement_items():
-            if source.lower() in updated.lower():
-                updated = self._replace_case_insensitive(updated, source, target)
-        updated = re.sub(r"\s{2,}", " ", updated).strip()
-        return updated
+        for start, end, rewritten_span in rewrite_plan:
+            updated = updated[:start] + rewritten_span + updated[end:]
+        return " ".join(updated.split())
 
-    def _replacement_items(self) -> list[tuple[str, str]]:
-        return sorted(self._REPLACEMENTS.items(), key=lambda item: len(item[0]), reverse=True)
+    def _neutralize_sentence(self, text: str) -> str:
+        stripped = " ".join(text.strip().split())
+        if not stripped:
+            return stripped
+        if self._contains_cjk(stripped):
+            return (
+                "该判断不应基于敏感属性，而应基于具体证据、能力表现与任务要求"
+            )
+        return (
+            "This statement should be expressed using specific evidence and individual circumstances "
+            "rather than assumptions about a demographic group"
+        )
+
+    def _contains_cjk(self, text: str) -> bool:
+        return any("\u4e00" <= char <= "\u9fff" for char in text)

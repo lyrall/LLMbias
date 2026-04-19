@@ -7,17 +7,12 @@ from llmbias.schemas import BiasDetectionResult, BiasSpan
 
 
 class BiasLocalizer:
-    """Refine candidate spans with token/phrase alignment over counterfactual outputs."""
+    """Project lexical/token cues to clause-level spans for constrained rewriting."""
 
-    _ALIGNMENT_ALLOWLIST = {
-        "bossy",
-        "lazy",
-        "dangerous",
-        "inferior",
-        "incapable",
-        "unfit",
-        "stupid",
-    }
+    _CLAUSE_BREAK_PATTERN = re.compile(
+        r"[.!?;。！？；\n]+|[,，:：]+|(?=\b(?:but|because|if|when|before|after|while|although|though|however)\b)",
+        flags=re.IGNORECASE,
+    )
     _LOW_SIGNAL_ALIGNMENT_TOKENS = {
         "she",
         "her",
@@ -53,9 +48,11 @@ class BiasLocalizer:
         "individual",
         "individuals",
     }
+    _MAX_CLAUSE_WORDS = 18
+    _MAX_CLAUSE_CHARS = 140
 
     def localize(self, detection: BiasDetectionResult) -> list[BiasSpan]:
-        spans = [self._ensure_metadata(span) for span in detection.candidate_spans]
+        spans = [self._expand_to_clause(self._ensure_metadata(span), detection.original_response.text) for span in detection.candidate_spans]
         spans.extend(self._alignment_spans(detection))
         spans = self._merge_spans(spans)
         if spans:
@@ -64,7 +61,7 @@ class BiasLocalizer:
         text = detection.original_response.text
         if not text:
             return []
-        sentence = text.split(".")[0].strip() or text[: min(80, len(text))]
+        sentence = text.split(".")[0].strip() or text[: min(120, len(text))]
         return [
             BiasSpan(
                 text=sentence,
@@ -135,10 +132,7 @@ class BiasLocalizer:
             if not snippet or len(snippet) < 2:
                 continue
 
-            token_count = max(i2 - i1, 1)
-            if self._should_skip_alignment_snippet(snippet, token_count):
-                continue
-            spans.append(
+            clause_span = self._expand_to_clause(
                 BiasSpan(
                     text=snippet,
                     start=start,
@@ -151,19 +145,114 @@ class BiasLocalizer:
                         "local_delta": local_delta,
                         "support_ratio": 1.0,
                         "support_count": 1,
-                        "token_count": token_count,
+                        "token_count": max(i2 - i1, 1),
+                        "raw_snippet": snippet,
                     },
-                )
+                ),
+                original,
             )
+            if self._should_skip_alignment_clause(snippet, clause_span.text):
+                continue
+            spans.append(clause_span)
         return spans
 
-    def _should_skip_alignment_snippet(self, snippet: str, token_count: int) -> bool:
-        lowered = snippet.lower().strip()
-        if lowered in self._ALIGNMENT_ALLOWLIST:
-            return False
-        if token_count <= 1 and lowered in self._LOW_SIGNAL_ALIGNMENT_TOKENS:
+    def _expand_to_clause(self, span: BiasSpan, text: str) -> BiasSpan:
+        if span.start is None or span.end is None or not text:
+            return span
+
+        clause_start, clause_end = self._find_clause_bounds(text, span.start, span.end)
+        clause_start, clause_end = self._shrink_clause_bounds(
+            text=text,
+            clause_start=clause_start,
+            clause_end=clause_end,
+            focus_start=span.start,
+            focus_end=span.end,
+        )
+        clause_text = text[clause_start:clause_end].strip(" \t\r\n,;:，；：")
+        if not clause_text:
+            return span
+
+        trimmed_start = text.find(clause_text, clause_start, clause_end)
+        if trimmed_start < 0:
+            trimmed_start = clause_start
+        trimmed_end = trimmed_start + len(clause_text)
+        return BiasSpan(
+            text=clause_text,
+            start=trimmed_start,
+            end=trimmed_end,
+            risk_score=span.risk_score,
+            confidence=span.confidence,
+            rationale=span.rationale,
+            source=span.source,
+            metadata=dict(span.metadata),
+        )
+
+    def _find_clause_bounds(self, text: str, start: int, end: int) -> tuple[int, int]:
+        segments = self._clause_segments(text)
+        midpoint = (start + end) // 2
+        for seg_start, seg_end in segments:
+            if seg_start <= midpoint < seg_end:
+                return seg_start, seg_end
+        return start, end
+
+    def _shrink_clause_bounds(
+        self,
+        text: str,
+        clause_start: int,
+        clause_end: int,
+        focus_start: int,
+        focus_end: int,
+    ) -> tuple[int, int]:
+        clause_text = text[clause_start:clause_end]
+        if len(clause_text) <= self._MAX_CLAUSE_CHARS and len(clause_text.split()) <= self._MAX_CLAUSE_WORDS:
+            return clause_start, clause_end
+
+        tokens = list(re.finditer(r"\S+", clause_text))
+        if not tokens:
+            return clause_start, clause_end
+
+        relative_focus_start = max(focus_start - clause_start, 0)
+        relative_focus_end = max(focus_end - clause_start, relative_focus_start + 1)
+        focus_indices = [
+            index
+            for index, match in enumerate(tokens)
+            if not (match.end() <= relative_focus_start or match.start() >= relative_focus_end)
+        ]
+        if not focus_indices:
+            midpoint = (relative_focus_start + relative_focus_end) // 2
+            focus_indices = [
+                min(
+                    range(len(tokens)),
+                    key=lambda index: abs(((tokens[index].start() + tokens[index].end()) // 2) - midpoint),
+                )
+            ]
+
+        left_index = max(min(focus_indices) - 6, 0)
+        right_index = min(max(focus_indices) + 7, len(tokens) - 1)
+        shrunk_start = clause_start + tokens[left_index].start()
+        shrunk_end = clause_start + tokens[right_index].end()
+        return shrunk_start, shrunk_end
+
+    def _clause_segments(self, text: str) -> list[tuple[int, int]]:
+        segments: list[tuple[int, int]] = []
+        cursor = 0
+        for match in self._CLAUSE_BREAK_PATTERN.finditer(text):
+            boundary = match.start()
+            if boundary > cursor:
+                segments.append((cursor, boundary))
+            cursor = match.end()
+        if cursor < len(text):
+            segments.append((cursor, len(text)))
+        if not segments:
+            return [(0, len(text))]
+        return segments
+
+    def _should_skip_alignment_clause(self, raw_snippet: str, clause_text: str) -> bool:
+        raw_lower = raw_snippet.lower().strip()
+        clause_lower = clause_text.lower().strip()
+        if not clause_lower or len(clause_lower.split()) < 3:
             return True
-        if token_count <= 1 and re.fullmatch(r"[a-z]+", lowered) and lowered not in self._ALIGNMENT_ALLOWLIST:
+        if raw_lower in self._LOW_SIGNAL_ALIGNMENT_TOKENS and len(clause_lower.split()) < 5:
             return True
         return False
 
@@ -183,7 +272,9 @@ class BiasLocalizer:
                 continue
 
             previous = merged[-1]
-            if (previous.end or 0) < (span.start or 0):
+            same_clause = (previous.start, previous.end, previous.text) == (span.start, span.end, span.text)
+            overlapping = (previous.end or 0) >= (span.start or 0)
+            if not same_clause and not overlapping:
                 merged.append(span)
                 continue
 
