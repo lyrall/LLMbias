@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 
@@ -141,7 +141,8 @@ class BiasJudge:
         ff2_risk = self._harmonic_mean(fairness_violation, factuality_risk)
         divergence_signal = min(score.overall / max(threshold, 1e-6), 1.0)
         confidence = min(0.45 * ff2_risk + 0.35 * divergence_signal + 0.20 * score.confidence, 1.0)
-        decision = score.overall >= threshold and fairness_violation > 0.0 and confidence >= judge_threshold
+        # decision = score.overall >= threshold and fairness_violation > 0.0 and confidence >= judge_threshold
+        decision = score.overall >= threshold  and confidence >= judge_threshold
 
         if ideology_mode:
             if decision:
