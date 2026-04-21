@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from llmbias.models.base import BlackBoxLLM
 from llmbias.schemas import BiasDetectionResult, RewriteCandidate
 
@@ -52,7 +54,7 @@ class MinimalEditor:
             revised = self._rewrite_span_text(text, candidate, detection)
             if not revised:
                 continue
-            revised = " ".join(revised.split())
+            revised = self._normalize_rewritten_span(revised, span.text)
             if revised and revised != span.text:
                 rewrite_plan.append((span.start, span.end, revised))
                 seen_ranges.add(span_range)
@@ -155,7 +157,9 @@ class MinimalEditor:
     def _clean_model_output(self, candidate: str) -> str | None:
         if not candidate:
             return None
-        cleaned = candidate.strip().strip('"').strip()
+        cleaned = candidate.strip().strip("`").strip()
+        cleaned = re.sub(r"^(?:Revised span|Rewritten span|Revision)\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = cleaned.strip('"').strip("'").strip()
         return cleaned or None
 
     def _looks_effective(self, candidate: str | None, original_span: str) -> bool:
@@ -169,7 +173,7 @@ class MinimalEditor:
         updated = text
         for start, end, rewritten_span in rewrite_plan:
             updated = updated[:start] + rewritten_span + updated[end:]
-        return " ".join(updated.split())
+        return self._cleanup_full_text(updated)
 
     def _neutralize_sentence(self, text: str) -> str:
         stripped = " ".join(text.strip().split())
@@ -186,3 +190,113 @@ class MinimalEditor:
 
     def _contains_cjk(self, text: str) -> bool:
         return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+    def _normalize_rewritten_span(self, rewritten: str, original_span: str) -> str:
+        cleaned = " ".join(rewritten.split())
+        cleaned = self._cleanup_full_text(cleaned)
+        cleaned = self._dedupe_repeated_segments(cleaned)
+        cleaned = self._cleanup_full_text(cleaned)
+        cleaned = self._trim_span_boundaries(cleaned)
+
+        original_words = max(len(original_span.split()), 1)
+        rewritten_words = len(cleaned.split())
+        if rewritten_words > original_words * 2 + 10:
+            cleaned = self._compress_overlong_span(cleaned, original_words)
+            cleaned = self._cleanup_full_text(cleaned)
+            cleaned = self._trim_span_boundaries(cleaned)
+        return cleaned
+
+    def _cleanup_full_text(self, text: str) -> str:
+        cleaned = " ".join(text.split())
+        cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+        cleaned = re.sub(r"([,.;:!?])([A-Za-z0-9\"'])", r"\1 \2", cleaned)
+        cleaned = re.sub(r"\.\.+", ".", cleaned)
+        cleaned = re.sub(r",,+", ",", cleaned)
+        cleaned = re.sub(r";;+", ";", cleaned)
+        cleaned = re.sub(r"::+", ":", cleaned)
+        cleaned = re.sub(r",\.", ".", cleaned)
+        cleaned = re.sub(r"\.,", ".", cleaned)
+        cleaned = re.sub(r";\.", ".", cleaned)
+        cleaned = re.sub(r"\.\s*\.", ".", cleaned)
+        cleaned = re.sub(r",\s*,", ", ", cleaned)
+        return cleaned.strip()
+
+    def _dedupe_repeated_segments(self, text: str) -> str:
+        text = re.sub(r"\b([A-Za-z][A-Za-z'-]*)\b(?:,\s*\1\b)+", r"\1", text, flags=re.IGNORECASE)
+        segments = [segment.strip() for segment in re.split(r"(?<=[,.;:!?])\s+", text) if segment.strip()]
+        if not segments:
+            return text
+
+        deduped: list[str] = []
+        for segment in segments:
+            if deduped and self._segments_redundant(deduped[-1], segment):
+                continue
+            deduped.append(segment)
+
+        return " ".join(self._dedupe_repeated_words(segment) for segment in deduped)
+
+    def _segments_redundant(self, previous: str, current: str) -> bool:
+        prev_norm = self._normalize_compare_text(previous)
+        curr_norm = self._normalize_compare_text(current)
+        if not prev_norm or not curr_norm:
+            return False
+        if prev_norm == curr_norm:
+            return True
+        prev_words = prev_norm.split()
+        curr_words = curr_norm.split()
+        if len(prev_words) >= 4 and " ".join(prev_words[-6:]) in curr_norm:
+            return True
+        if len(curr_words) >= 4 and " ".join(curr_words[:6]) in prev_norm:
+            return True
+        return False
+
+    def _dedupe_repeated_words(self, text: str) -> str:
+        words = text.split()
+        if len(words) < 6:
+            return text
+
+        changed = True
+        while changed:
+            changed = False
+            max_window = min(10, len(words) // 2)
+            for window in range(max_window, 2, -1):
+                index = 0
+                while index + window * 2 <= len(words):
+                    left = [self._normalize_compare_text(item) for item in words[index : index + window]]
+                    right = [self._normalize_compare_text(item) for item in words[index + window : index + window * 2]]
+                    if left == right:
+                        del words[index + window : index + window * 2]
+                        changed = True
+                        break
+                    index += 1
+                if changed:
+                    break
+        return " ".join(words)
+
+    def _trim_span_boundaries(self, text: str) -> str:
+        trimmed = text.strip(" \t\r\n,;:")
+        trimmed = re.sub(r"\s+([,.;:!?])", r"\1", trimmed)
+        trimmed = re.sub(r"([,.;:!?]){2,}$", lambda match: match.group(0)[0], trimmed)
+        return trimmed
+
+    def _compress_overlong_span(self, text: str, original_word_count: int) -> str:
+        sentence_parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
+        if sentence_parts:
+            budget = max(original_word_count + 8, original_word_count * 2)
+            kept: list[str] = []
+            total_words = 0
+            for part in sentence_parts:
+                part_words = len(part.split())
+                if kept and total_words + part_words > budget:
+                    break
+                kept.append(part)
+                total_words += part_words
+            if kept:
+                return " ".join(kept)
+        return text
+
+    def _normalize_compare_text(self, text: str) -> str:
+        lowered = text.lower()
+        lowered = re.sub(r"[^\w\s]", " ", lowered)
+        lowered = re.sub(r"\s+", " ", lowered).strip()
+        return lowered

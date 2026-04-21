@@ -67,16 +67,35 @@ class ConsistencyValidator:
         fairness_gain = max(original_bias - residual_bias, 0.0)
         edit_ratio = self._edit_ratio(original, rewritten)
         coherence = self._coherence(original, rewritten)
+        repetition_penalty = self._repetition_penalty(rewritten)
+        punctuation_penalty = self._punctuation_penalty(rewritten)
+        truncation_penalty = self._truncation_penalty(rewritten)
         facts_preserved = self._facts_preserved(original, rewritten)
         no_new_harm = self._harm_count(rewritten) <= self._harm_count(original)
         bias_reduced = fairness_gain >= self.config.min_fairness_gain or residual_bias < original_bias
         direct_response_mode = bool(detection.sample.metadata.get("text_is_response"))
         if direct_response_mode:
-            q_score = 0.60 * fairness_gain + 0.20 * preservation + 0.15 * coherence - 0.05 * edit_ratio
+            q_score = (
+                0.60 * fairness_gain
+                + 0.20 * preservation
+                + 0.15 * coherence
+                - 0.05 * edit_ratio
+                - 0.15 * repetition_penalty
+                - 0.10 * punctuation_penalty
+                - 0.10 * truncation_penalty
+            )
             min_preservation = 0.05
             accept_threshold = max(self.config.accept_threshold - 0.10, 0.20)
         else:
-            q_score = 0.40 * fairness_gain + 0.35 * preservation + 0.15 * coherence - 0.10 * edit_ratio
+            q_score = (
+                0.40 * fairness_gain
+                + 0.35 * preservation
+                + 0.15 * coherence
+                - 0.10 * edit_ratio
+                - 0.20 * repetition_penalty
+                - 0.10 * punctuation_penalty
+                - 0.10 * truncation_penalty
+            )
             min_preservation = 0.35
             accept_threshold = self.config.accept_threshold
         strong_bias_removal = direct_response_mode and residual_bias == 0.0 and fairness_gain > 0.03
@@ -88,6 +107,9 @@ class ConsistencyValidator:
             and no_new_harm
             and bias_reduced
             and preservation >= min_preservation
+            and repetition_penalty <= 0.15
+            and punctuation_penalty <= 0.20
+            and truncation_penalty <= 0.20
             and (q_score >= accept_threshold or strong_bias_removal)
         )
         return (
@@ -99,6 +121,9 @@ class ConsistencyValidator:
                 "edit_ratio": edit_ratio,
                 "coherence": coherence,
                 "q_score": q_score,
+                "repetition_penalty": repetition_penalty,
+                "punctuation_penalty": punctuation_penalty,
+                "truncation_penalty": truncation_penalty,
                 "facts_preserved": 1.0 if facts_preserved else 0.0,
                 "no_new_harm": 1.0 if no_new_harm else 0.0,
                 "candidate_count": float(len(candidates)),
@@ -135,3 +160,61 @@ class ConsistencyValidator:
     def _harm_count(self, text: str) -> int:
         lowered = text.lower()
         return sum(lowered.count(pattern.lower()) for pattern in self._HARM_PATTERNS)
+
+    def _repetition_penalty(self, text: str) -> float:
+        normalized = re.sub(r"\s+", " ", text.lower()).strip()
+        if not normalized:
+            return 0.0
+
+        clauses = [
+            re.sub(r"\s+", " ", part).strip(" ,.;:!?")
+            for part in re.split(r"[,.!?;:]+", normalized)
+            if part.strip()
+        ]
+        duplicate_clause_hits = 0
+        for previous, current in zip(clauses, clauses[1:]):
+            if current and previous and (current == previous or current in previous or previous in current):
+                duplicate_clause_hits += 1
+
+        tokens = re.findall(r"\w+", normalized)
+        repeated_ngram_hits = 0
+        if len(tokens) >= 8:
+            fourgrams: dict[tuple[str, ...], int] = {}
+            for index in range(len(tokens) - 3):
+                key = tuple(tokens[index : index + 4])
+                fourgrams[key] = fourgrams.get(key, 0) + 1
+            repeated_ngram_hits = sum(count - 1 for count in fourgrams.values() if count > 1)
+
+        penalty = 0.18 * duplicate_clause_hits + 0.04 * repeated_ngram_hits
+        return min(max(penalty, 0.0), 1.0)
+
+    def _punctuation_penalty(self, text: str) -> float:
+        duplicate_punct = len(re.findall(r"([,.;:!?])\1+", text))
+        broken_pairs = len(re.findall(r",\.|\.,|;\.|:\.|,\s*,", text))
+        quote_imbalance = abs(text.count('"') % 2) + abs(text.count("'") % 2)
+        paren_imbalance = abs(text.count("(") - text.count(")"))
+        penalty = 0.18 * duplicate_punct + 0.15 * broken_pairs + 0.08 * quote_imbalance + 0.08 * paren_imbalance
+        return min(max(penalty, 0.0), 1.0)
+
+    def _truncation_penalty(self, text: str) -> float:
+        stripped = text.strip()
+        if not stripped:
+            return 1.0
+
+        penalty = 0.0
+        if re.search(r"(?:and|or|but|because|while|which|that|to|of|for|with)$", stripped, flags=re.IGNORECASE):
+            penalty += 0.30
+        fragments = [
+            fragment.strip()
+            for fragment in re.split(r"[.!?]+", stripped)
+            if fragment.strip()
+        ]
+        orphan_fragments = 0
+        for fragment in fragments:
+            words = re.findall(r"\w+", fragment)
+            if 0 < len(words) <= 2 and len(fragment) <= 20:
+                orphan_fragments += 1
+        penalty += 0.12 * orphan_fragments
+        if stripped.endswith((",", ";", ":")):
+            penalty += 0.18
+        return min(max(penalty, 0.0), 1.0)
