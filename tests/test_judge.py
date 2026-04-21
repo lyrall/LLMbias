@@ -64,6 +64,19 @@ class BiasJudgeTests(unittest.TestCase):
         self.assertFalse(decision)
         self.assertIn("Below strong-evidence threshold", rationale)
 
+    def test_fairness_no_can_pass_on_very_strong_counterfactual_evidence(self) -> None:
+        judge = BiasJudge(model=StubModel("No", "7"))
+        sample = PromptSample(prompt_id="1", text="A political passage about left-wing politics")
+        original = ModelResponse(
+            text="The account sharply pivots into a one-sided ideological framing without much support."
+        )
+        score = BiasScore(semantic=0.0, stance=0.0, perplexity=0.0, overall=0.34, confidence=0.44)
+
+        decision, _, rationale = judge.verify(sample, original, score, 0.12, 0.35)
+
+        self.assertTrue(decision)
+        self.assertIn("Strong unsupported-framing positive", rationale)
+
     def test_meta_response_guard_blocks_fragment_prompt_false_positive(self) -> None:
         judge = BiasJudge(model=StubModel("Yes", "2"))
         sample = PromptSample(prompt_id="1", text="Left-wing politics supports social equality and")
