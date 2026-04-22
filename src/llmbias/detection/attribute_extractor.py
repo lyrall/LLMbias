@@ -70,12 +70,36 @@ class SensitiveAttributeExtractor:
             "grooms": 0.86,
         },
         "political_ideology": {
+            "democracy": 0.93,
+            "social democracy": 0.96,
+            "democratic socialism": 0.96,
+            "liberalism": 0.95,
+            "liberal": 0.88,
+            "social liberalism": 0.95,
+            "conservatism": 0.95,
+            "conservative": 0.88,
             "far-left": 0.97,
             "far-right": 0.97,
             "centre-left": 0.96,
             "center-left": 0.96,
             "centre-right": 0.96,
             "center-right": 0.96,
+            "jewish left": 0.94,
+            "jewish right": 0.94,
+            "european left": 0.94,
+            "european right": 0.94,
+            "left bloc": 0.94,
+            "right bloc": 0.94,
+            "historical left": 0.93,
+            "historical right": 0.93,
+            "left shachtmanism": 0.93,
+            "right shachtmanism": 0.93,
+            "spiritual left": 0.92,
+            "spiritual right": 0.92,
+            "spiritual leftism": 0.92,
+            "spiritual rightism": 0.92,
+            "left realism": 0.92,
+            "right realism": 0.92,
             "left-wing": 0.95,
             "right-wing": 0.95,
             "leftist": 0.94,
@@ -111,8 +135,11 @@ class SensitiveAttributeExtractor:
             "基督徒": 0.95,
             "佛教徒": 0.92,
             "muslim": 0.95,
+            "islamic": 0.93,
             "christian": 0.95,
+            "christianity": 0.93,
             "buddhist": 0.92,
+            "buddhism": 0.9,
         },
         "age": {
             "老年": 0.92,
@@ -164,7 +191,39 @@ class SensitiveAttributeExtractor:
                             source="rule_lexicon",
                         )
                     )
+        matches.extend(self._augment_from_metadata(sample, matches))
         return sorted(matches, key=lambda item: (item.start is None, item.start or -1))
+
+    def _augment_from_metadata(
+        self,
+        sample: PromptSample,
+        matches: list[SensitiveAttribute],
+    ) -> list[SensitiveAttribute]:
+        if any(attribute.category == "gender" for attribute in matches):
+            return []
+        if str(sample.metadata.get("dataset", "")).lower() != "bold":
+            return []
+        if str(sample.metadata.get("domain", "")).lower() != "gender":
+            return []
+
+        category = str(sample.metadata.get("category", "")).strip().lower()
+        if category.endswith("actors"):
+            inferred = "actor"
+        elif category.endswith("actresses"):
+            inferred = "actress"
+        else:
+            return []
+
+        return [
+            SensitiveAttribute(
+                category="gender",
+                value=inferred,
+                start=None,
+                end=None,
+                confidence=0.72,
+                source="metadata_category",
+            )
+        ]
 
     def _find_mentions(self, text: str, value: str) -> list[tuple[int, int]]:
         if value.isascii() and any(char.isalpha() for char in value):

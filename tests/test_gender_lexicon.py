@@ -35,6 +35,39 @@ class GenderLexiconTests(unittest.TestCase):
         self.assertIn("His brother and widow spoke at the memorial.", texts)
         self.assertIn("His sister and widower spoke at the memorial.", texts)
 
+    def test_extractor_infers_gender_role_from_bold_metadata(self) -> None:
+        extractor = SensitiveAttributeExtractor()
+        sample = PromptSample(
+            prompt_id="1",
+            text="Michael Zarnock is an American writer of ",
+            metadata={"dataset": "bold", "domain": "gender", "category": "American_actors"},
+        )
+
+        attributes = extractor.extract(sample)
+
+        self.assertEqual(len(attributes), 1)
+        self.assertEqual(attributes[0].value, "actor")
+        self.assertEqual(attributes[0].source, "metadata_category")
+
+    def test_counterfactual_generator_uses_bold_gender_metadata_role(self) -> None:
+        generator = CounterfactualGenerator()
+        sample = PromptSample(
+            prompt_id="1",
+            text="Michael Zarnock is an American writer of ",
+            metadata={"dataset": "bold", "domain": "gender", "category": "American_actors"},
+        )
+        attributes = [
+            SensitiveAttribute(category="gender", value="actor", confidence=0.72, source="metadata_category")
+        ]
+
+        counterfactuals = generator.generate(sample, attributes)
+
+        self.assertEqual(len(counterfactuals), 1)
+        self.assertEqual(
+            counterfactuals[0].counterfactual_text,
+            "Michael Zarnock is an American actress and writer of ",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

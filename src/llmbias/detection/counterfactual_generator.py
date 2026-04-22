@@ -66,12 +66,36 @@ class CounterfactualGenerator:
             "grooms": "brides",
         },
         "political_ideology": {
+            "democracy": "authoritarianism",
+            "social democracy": "authoritarian conservatism",
+            "democratic socialism": "authoritarian capitalism",
+            "liberalism": "conservatism",
+            "liberal": "conservative",
+            "social liberalism": "social conservatism",
+            "conservatism": "liberalism",
+            "conservative": "liberal",
             "far-left": "far-right",
             "far-right": "far-left",
             "centre-left": "centre-right",
             "center-left": "center-right",
             "centre-right": "centre-left",
             "center-right": "center-left",
+            "jewish left": "jewish right",
+            "jewish right": "jewish left",
+            "european left": "european right",
+            "european right": "european left",
+            "left bloc": "right bloc",
+            "right bloc": "left bloc",
+            "historical left": "historical right",
+            "historical right": "historical left",
+            "left shachtmanism": "right shachtmanism",
+            "right shachtmanism": "left shachtmanism",
+            "spiritual left": "spiritual right",
+            "spiritual right": "spiritual left",
+            "spiritual leftism": "spiritual rightism",
+            "spiritual rightism": "spiritual leftism",
+            "left realism": "right realism",
+            "right realism": "left realism",
             "left-wing": "right-wing",
             "right-wing": "left-wing",
             "leftist": "rightist",
@@ -103,6 +127,17 @@ class CounterfactualGenerator:
             "fascism": "anarchism",
             "fascist": "anarchist",
         },
+        "religion": {
+            "muslim": "christian",
+            "islamic": "christian",
+            "christian": "muslim",
+            "christianity": "islam",
+            "buddhist": "christian",
+            "buddhism": "christianity",
+            "ç©†æ–¯æž—": "åŸºç£å¾’",
+            "åŸºç£å¾’": "ç©†æ–¯æž—",
+            "ä½›æ•™å¾’": "åŸºç£å¾’",
+        },
         "age": {
             "elderly": "young",
             "old": "young",
@@ -129,7 +164,10 @@ class CounterfactualGenerator:
             swapped = self._lookup_swap(attribute)
             if swapped is None:
                 continue
-            cf_text = self._replace_attribute(sample.text, attribute, swapped)
+            if attribute.source == "metadata_category":
+                cf_text = self._replace_attribute_from_metadata(sample, attribute, swapped)
+            else:
+                cf_text = self._replace_attribute(sample.text, attribute, swapped)
             if cf_text is None or cf_text == sample.text:
                 continue
             counterfactuals.append(
@@ -181,3 +219,50 @@ class CounterfactualGenerator:
         if original[:1].isupper():
             return swapped[:1].upper() + swapped[1:]
         return swapped
+
+    def _replace_attribute_from_metadata(
+        self,
+        sample: PromptSample,
+        attribute: SensitiveAttribute,
+        swapped: str,
+    ) -> str | None:
+        text = sample.text
+        swapped_surface = self._match_surface_form(attribute.value, swapped)
+        explicit = self._replace_explicit_role_term(text, attribute.value, swapped_surface)
+        if explicit is not None and explicit != text:
+            return explicit
+
+        patterns: list[tuple[re.Pattern[str], str]] = [
+            (
+                re.compile(r"\b(is|was)\s+an\s+American\b", flags=re.IGNORECASE),
+                r"\1 an American {role} and",
+            ),
+            (
+                re.compile(r"\b(is|was)\s+an\b", flags=re.IGNORECASE),
+                r"\1 an {role} and",
+            ),
+            (
+                re.compile(r"\b(is|was)\s+a\b", flags=re.IGNORECASE),
+                rf"\1 {self._indefinite_article(swapped_surface)} {swapped_surface} and",
+            ),
+            (
+                re.compile(r"\b(is|was)\b", flags=re.IGNORECASE),
+                rf"\1 {self._indefinite_article(swapped_surface)} {swapped_surface} and",
+            ),
+        ]
+
+        for pattern, replacement in patterns:
+            if pattern.search(text):
+                return pattern.sub(replacement.format(role=swapped_surface), text, count=1)
+        return None
+
+    def _replace_explicit_role_term(self, text: str, original_value: str, swapped_value: str) -> str | None:
+        pattern = re.compile(rf"\b{re.escape(original_value)}\b", flags=re.IGNORECASE)
+        match = pattern.search(text)
+        if not match:
+            return None
+        replacement = self._match_surface_form(match.group(0), swapped_value)
+        return text[: match.start()] + replacement + text[match.end() :]
+
+    def _indefinite_article(self, value: str) -> str:
+        return "an" if value[:1].lower() in {"a", "e", "i", "o", "u"} else "a"

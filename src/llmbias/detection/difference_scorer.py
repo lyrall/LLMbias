@@ -58,6 +58,12 @@ class DifferenceScorer:
             return BiasScore(semantic=0.0, stance=0.0, perplexity=0.0, overall=0.0)
 
         deltas = [self.compare_pair(original.text, item.text) for item in counterfactuals]
+        return self.aggregate_deltas(deltas, weights)
+
+    def aggregate_deltas(self, deltas: list[dict[str, float]], weights: dict[str, float]) -> BiasScore:
+        if not deltas:
+            return BiasScore(semantic=0.0, stance=0.0, perplexity=0.0, overall=0.0)
+
         semantic = self._mean(delta["semantic"] for delta in deltas)
         stance = self._mean(delta["stance"] for delta in deltas)
         perplexity = self._mean(delta["perplexity"] for delta in deltas)
