@@ -288,15 +288,19 @@ class CounterfactualGenerator:
         swapped: str,
     ) -> str | None:
         swapped_surface = self._match_surface_form(attribute.value, swapped)
+        swapped_surface = swapped_surface[:1].upper() + swapped_surface[1:]
 
         explicit_patterns: list[tuple[re.Pattern[str], str]] = [
             (
-                re.compile(r"\b([A-Za-z]+)-American\b", flags=re.IGNORECASE),
+                re.compile(r"\b([A-Za-z][A-Za-z-]*)-American\b", flags=re.IGNORECASE),
                 swapped_surface,
             ),
             (
-                re.compile(r"\b([A-Za-z]+)\s+American\b", flags=re.IGNORECASE),
-                swapped_surface,
+                re.compile(
+                    r"\b(an?)\s+([A-Za-z][A-Za-z-]*(?:\s+[A-Za-z][A-Za-z-]*){0,2})\s+American\b",
+                    flags=re.IGNORECASE,
+                ),
+                "{article} {race}",
             ),
             (
                 re.compile(r"\b(Asian|African|European|Hispanic|Latino|Latina)-American\b", flags=re.IGNORECASE),
@@ -310,7 +314,15 @@ class CounterfactualGenerator:
         for pattern, replacement in explicit_patterns:
             match = pattern.search(text)
             if match:
-                return text[: match.start()] + self._match_surface_form(match.group(0), replacement) + text[match.end() :]
+                replacement_text = replacement
+                if "{article}" in replacement:
+                    replacement_text = replacement.format(
+                        article=self._match_surface_form(match.group(1), self._indefinite_article(swapped_surface)),
+                        race=swapped_surface,
+                    )
+                else:
+                    replacement_text = self._match_surface_form(match.group(0), replacement)
+                return text[: match.start()] + replacement_text + text[match.end() :]
 
         swapped_surface = swapped_surface.replace("-", " ")
         patterns: list[tuple[re.Pattern[str], str]] = [
@@ -330,7 +342,57 @@ class CounterfactualGenerator:
         for pattern, replacement in patterns:
             if pattern.search(text):
                 return pattern.sub(replacement.format(race=swapped_surface), text, count=1)
+
+        profession_patterns = self._race_profession_patterns(swapped_surface)
+        for pattern, replacement in profession_patterns:
+            if pattern.search(text):
+                return pattern.sub(replacement, text, count=1)
+
         return None
 
     def _indefinite_article(self, value: str) -> str:
-        return "an" if value[:1].lower() in {"a", "e", "i", "o", "u"} else "a"
+        lowered = value.strip().lower()
+        if lowered.startswith(("eu", "uni", "use", "u.s")):
+            return "a"
+        return "an" if lowered[:1] in {"a", "e", "i", "o", "u"} else "a"
+
+    def _race_profession_patterns(self, swapped_surface: str) -> list[tuple[re.Pattern[str], str]]:
+        article = self._indefinite_article(swapped_surface)
+        role_keywords = (
+            "actor|actress|artist|writer|poet|novelist|author|designer|engineer|"
+            "entrepreneur|executive|businessman|businesswoman|businessperson|"
+            "mathematician|scientist|professor|economist|photographer|director|"
+            "producer|architect|journalist|politician|lawyer|physician|doctor|"
+            "singer|songwriter|musician|composer|dancer|athlete|player|coach|"
+            "researcher|educator|scholar|historian|philanthropist|activist"
+        )
+        return [
+            (
+                re.compile(
+                    rf"\b(is|was)\s+(?:an|a)\s+[A-Za-z][A-Za-z-]+\s+({role_keywords})\b",
+                    flags=re.IGNORECASE,
+                ),
+                rf"\1 {article} {swapped_surface} \2",
+            ),
+            (
+                re.compile(
+                    rf"\b(is|was)\s+the\s+({role_keywords})\b",
+                    flags=re.IGNORECASE,
+                ),
+                rf"\1 the {swapped_surface} \2",
+            ),
+            (
+                re.compile(
+                    rf"\b(serves|served)\s+as\s+(?:an|a)\s+({role_keywords})\b",
+                    flags=re.IGNORECASE,
+                ),
+                rf"\1 as {article} {swapped_surface} \2",
+            ),
+            (
+                re.compile(
+                    rf"\b(serves|served)\s+as\s+the\s+({role_keywords})\b",
+                    flags=re.IGNORECASE,
+                ),
+                rf"\1 as the {swapped_surface} \2",
+            ),
+        ]

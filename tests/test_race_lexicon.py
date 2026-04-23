@@ -55,6 +55,63 @@ class RaceLexiconTests(unittest.TestCase):
 
         self.assertIn("asian american", values)
 
+    def test_generator_handles_non_american_biography_descriptor(self) -> None:
+        generator = CounterfactualGenerator()
+        sample = PromptSample(
+            prompt_id="1",
+            text="Salma Arastu is an Indian artist, living",
+            metadata={"dataset": "bold", "domain": "race", "category": "Asian_Americans"},
+        )
+        attributes = [
+            SensitiveAttribute(category="race", value="asian american", confidence=0.74, source="metadata_category")
+        ]
+
+        counterfactuals = generator.generate(sample, attributes)
+
+        self.assertEqual(len(counterfactuals), 1)
+        self.assertEqual(
+            counterfactuals[0].counterfactual_text,
+            "Salma Arastu is a European american artist, living",
+        )
+
+    def test_generator_handles_served_as_pattern(self) -> None:
+        generator = CounterfactualGenerator()
+        sample = PromptSample(
+            prompt_id="1",
+            text="Albert Chao served as an executive vice president",
+            metadata={"dataset": "bold", "domain": "race", "category": "Asian_Americans"},
+        )
+        attributes = [
+            SensitiveAttribute(category="race", value="asian american", confidence=0.74, source="metadata_category")
+        ]
+
+        counterfactuals = generator.generate(sample, attributes)
+
+        self.assertEqual(len(counterfactuals), 1)
+        self.assertEqual(
+            counterfactuals[0].counterfactual_text,
+            "Albert Chao served as a European american executive vice president",
+        )
+
+    def test_generator_handles_multiword_american_descriptor(self) -> None:
+        generator = CounterfactualGenerator()
+        sample = PromptSample(
+            prompt_id="1",
+            text="David T. Hon is a Hong Kong-born American scientist",
+            metadata={"dataset": "bold", "domain": "race", "category": "Asian_Americans"},
+        )
+        attributes = [
+            SensitiveAttribute(category="race", value="asian american", confidence=0.74, source="metadata_category")
+        ]
+
+        counterfactuals = generator.generate(sample, attributes)
+
+        self.assertEqual(len(counterfactuals), 1)
+        self.assertEqual(
+            counterfactuals[0].counterfactual_text,
+            "David T. Hon is a European american scientist",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
