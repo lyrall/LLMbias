@@ -65,6 +65,20 @@ class CounterfactualGenerator:
             "groom": "bride",
             "grooms": "brides",
         },
+        "race": {
+            "asian": "white",
+            "black": "white",
+            "white": "black",
+            "asian american": "european american",
+            "african american": "european american",
+            "european american": "african american",
+            "hispanic american": "european american",
+            "latino american": "european american",
+            "latina american": "european american",
+            "latino": "white",
+            "latina": "white",
+            "hispanic": "white",
+        },
         "political_ideology": {
             "democracy": "authoritarianism",
             "social democracy": "authoritarian conservatism",
@@ -226,6 +240,9 @@ class CounterfactualGenerator:
         attribute: SensitiveAttribute,
         swapped: str,
     ) -> str | None:
+        if attribute.category == "race":
+            return self._replace_race_from_metadata(sample.text, attribute, swapped)
+
         text = sample.text
         swapped_surface = self._match_surface_form(attribute.value, swapped)
         explicit = self._replace_explicit_role_term(text, attribute.value, swapped_surface)
@@ -263,6 +280,57 @@ class CounterfactualGenerator:
             return None
         replacement = self._match_surface_form(match.group(0), swapped_value)
         return text[: match.start()] + replacement + text[match.end() :]
+
+    def _replace_race_from_metadata(
+        self,
+        text: str,
+        attribute: SensitiveAttribute,
+        swapped: str,
+    ) -> str | None:
+        swapped_surface = self._match_surface_form(attribute.value, swapped)
+
+        explicit_patterns: list[tuple[re.Pattern[str], str]] = [
+            (
+                re.compile(r"\b([A-Za-z]+)-American\b", flags=re.IGNORECASE),
+                swapped_surface,
+            ),
+            (
+                re.compile(r"\b([A-Za-z]+)\s+American\b", flags=re.IGNORECASE),
+                swapped_surface,
+            ),
+            (
+                re.compile(r"\b(Asian|African|European|Hispanic|Latino|Latina)-American\b", flags=re.IGNORECASE),
+                swapped_surface,
+            ),
+            (
+                re.compile(r"\b(Asian|African|European|Hispanic|Latino|Latina)\s+American\b", flags=re.IGNORECASE),
+                swapped_surface,
+            ),
+        ]
+        for pattern, replacement in explicit_patterns:
+            match = pattern.search(text)
+            if match:
+                return text[: match.start()] + self._match_surface_form(match.group(0), replacement) + text[match.end() :]
+
+        swapped_surface = swapped_surface.replace("-", " ")
+        patterns: list[tuple[re.Pattern[str], str]] = [
+            (
+                re.compile(r"\b(is|was)\s+an\s+American\b", flags=re.IGNORECASE),
+                r"\1 an {race}",
+            ),
+            (
+                re.compile(r"\b(is|was)\s+a\s+American\b", flags=re.IGNORECASE),
+                r"\1 a {race}",
+            ),
+            (
+                re.compile(r"\b(is|was)\s+American\b", flags=re.IGNORECASE),
+                r"\1 {race}",
+            ),
+        ]
+        for pattern, replacement in patterns:
+            if pattern.search(text):
+                return pattern.sub(replacement.format(race=swapped_surface), text, count=1)
+        return None
 
     def _indefinite_article(self, value: str) -> str:
         return "an" if value[:1].lower() in {"a", "e", "i", "o", "u"} else "a"

@@ -168,6 +168,15 @@ class SensitiveAttributeExtractor:
             "black": 0.9,
             "white": 0.9,
             "asian": 0.9,
+            "asian american": 0.95,
+            "african american": 0.95,
+            "european american": 0.95,
+            "hispanic american": 0.94,
+            "latino american": 0.94,
+            "latina american": 0.94,
+            "latino": 0.9,
+            "latina": 0.9,
+            "hispanic": 0.9,
         },
     }
 
@@ -199,31 +208,58 @@ class SensitiveAttributeExtractor:
         sample: PromptSample,
         matches: list[SensitiveAttribute],
     ) -> list[SensitiveAttribute]:
-        if any(attribute.category == "gender" for attribute in matches):
-            return []
         if str(sample.metadata.get("dataset", "")).lower() != "bold":
             return []
-        if str(sample.metadata.get("domain", "")).lower() != "gender":
-            return []
-
+        domain = str(sample.metadata.get("domain", "")).lower()
         category = str(sample.metadata.get("category", "")).strip().lower()
-        if category.endswith("actors"):
-            inferred = "actor"
-        elif category.endswith("actresses"):
-            inferred = "actress"
-        else:
-            return []
 
-        return [
-            SensitiveAttribute(
-                category="gender",
-                value=inferred,
-                start=None,
-                end=None,
-                confidence=0.72,
-                source="metadata_category",
-            )
-        ]
+        if domain == "gender":
+            if any(attribute.category == "gender" for attribute in matches):
+                return []
+            if category.endswith("actors"):
+                inferred = "actor"
+            elif category.endswith("actresses"):
+                inferred = "actress"
+            else:
+                return []
+            return [
+                SensitiveAttribute(
+                    category="gender",
+                    value=inferred,
+                    start=None,
+                    end=None,
+                    confidence=0.72,
+                    source="metadata_category",
+                )
+            ]
+
+        if domain == "race":
+            if any(attribute.category == "race" for attribute in matches):
+                return []
+            inferred = self._infer_race_from_bold_category(category)
+            if inferred is None:
+                return []
+            return [
+                SensitiveAttribute(
+                    category="race",
+                    value=inferred,
+                    start=None,
+                    end=None,
+                    confidence=0.74,
+                    source="metadata_category",
+                )
+            ]
+
+        return []
+
+    def _infer_race_from_bold_category(self, category: str) -> str | None:
+        mapping = {
+            "asian_americans": "asian american",
+            "african_americans": "african american",
+            "european_americans": "european american",
+            "hispanic_and_latino_americans": "hispanic american",
+        }
+        return mapping.get(category)
 
     def _find_mentions(self, text: str, value: str) -> list[tuple[int, int]]:
         if value.isascii() and any(char.isalpha() for char in value):
