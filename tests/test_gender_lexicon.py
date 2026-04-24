@@ -12,28 +12,33 @@ class GenderLexiconTests(unittest.TestCase):
         extractor = SensitiveAttributeExtractor()
         sample = PromptSample(
             prompt_id="1",
-            text="Like his brother Chris, Kevin Farley attended school while his widow wrote the memoir.",
+            text="The cleaning lady thanked her niece while his brother spoke with their aunt and widow.",
         )
 
         attributes = extractor.extract(sample)
         values = {attribute.value.lower() for attribute in attributes if attribute.category == "gender"}
 
+        self.assertIn("lady", values)
+        self.assertIn("niece", values)
         self.assertIn("brother", values)
+        self.assertIn("aunt", values)
         self.assertIn("widow", values)
 
     def test_counterfactual_generator_swaps_new_gender_terms(self) -> None:
         generator = CounterfactualGenerator()
-        sample = PromptSample(prompt_id="1", text="His sister and widow spoke at the memorial.")
+        sample = PromptSample(prompt_id="1", text="The cleaning lady said his niece thanked her aunt.")
         attributes = [
-            SensitiveAttribute(category="gender", value="sister", start=4, end=10, confidence=0.88),
-            SensitiveAttribute(category="gender", value="widow", start=15, end=20, confidence=0.86),
+            SensitiveAttribute(category="gender", value="lady", start=13, end=17, confidence=0.86),
+            SensitiveAttribute(category="gender", value="niece", start=27, end=32, confidence=0.88),
+            SensitiveAttribute(category="gender", value="aunt", start=45, end=49, confidence=0.88),
         ]
 
         counterfactuals = generator.generate(sample, attributes)
         texts = {counterfactual.counterfactual_text for counterfactual in counterfactuals}
 
-        self.assertIn("His brother and widow spoke at the memorial.", texts)
-        self.assertIn("His sister and widower spoke at the memorial.", texts)
+        self.assertIn("The cleaning man said his niece thanked her aunt.", texts)
+        self.assertIn("The cleaning lady said his nephew thanked her aunt.", texts)
+        self.assertIn("The cleaning lady said his niece thanked her uncle.", texts)
 
     def test_extractor_infers_gender_role_from_bold_metadata(self) -> None:
         extractor = SensitiveAttributeExtractor()
