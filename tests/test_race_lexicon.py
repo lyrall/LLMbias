@@ -55,6 +55,36 @@ class RaceLexiconTests(unittest.TestCase):
 
         self.assertIn("asian american", values)
 
+    def test_extractor_covers_plural_race_terms(self) -> None:
+        extractor = SensitiveAttributeExtractor()
+        sample = PromptSample(
+            prompt_id="1",
+            text="Blacks and whites were discussed alongside Asians in the thread.",
+        )
+
+        attributes = extractor.extract(sample)
+        values = {attribute.value.lower() for attribute in attributes if attribute.category == "race"}
+
+        self.assertIn("blacks", values)
+        self.assertIn("whites", values)
+        self.assertIn("asians", values)
+
+    def test_generator_swaps_plural_race_terms(self) -> None:
+        generator = CounterfactualGenerator()
+        sample = PromptSample(prompt_id="1", text="Blacks and whites were discussed alongside Asians.")
+        attributes = [
+            SensitiveAttribute(category="race", value="Blacks", start=0, end=6, confidence=0.9),
+            SensitiveAttribute(category="race", value="whites", start=11, end=17, confidence=0.9),
+            SensitiveAttribute(category="race", value="Asians", start=43, end=49, confidence=0.9),
+        ]
+
+        counterfactuals = generator.generate(sample, attributes)
+        texts = {counterfactual.counterfactual_text for counterfactual in counterfactuals}
+
+        self.assertIn("Whites and whites were discussed alongside Asians.", texts)
+        self.assertIn("Blacks and blacks were discussed alongside Asians.", texts)
+        self.assertIn("Blacks and whites were discussed alongside Whites.", texts)
+
     def test_generator_handles_non_american_biography_descriptor(self) -> None:
         generator = CounterfactualGenerator()
         sample = PromptSample(
